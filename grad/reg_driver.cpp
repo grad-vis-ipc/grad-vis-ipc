@@ -37,11 +37,7 @@ int main(const int argc, const char* argv[])
   auto a  = xt::eval(test_labels);
   auto p =  xt::eval(predictions > .5);
 
-  double sum = 0;
-  for (int i = 0; i < p.size(); ++i) {
-    sum += (a[i] == p[i]);
-  }
-  auto accuracy = sum/p.size();
+  auto accuracy = xt::mean(xt::isclose(a,p));
   IC(accuracy);
 
   return EXIT_SUCCESS;
