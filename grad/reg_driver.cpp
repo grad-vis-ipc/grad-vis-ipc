@@ -1,6 +1,10 @@
-/* */
 #include "logistic_regression.hpp"
 #include "xtensor/xadapt.hpp"
+
+using d_vec = xt::xarray<double>;
+using b_vec = xt::xarray<bool>;
+using t = std::size_t;
+using d = double;
 
 int main(const int argc, const char* argv[])
 {
@@ -33,11 +37,11 @@ int main(const int argc, const char* argv[])
   IC(weights.shape());
   auto scores = xt::linalg::dot(xt::eval(test_set), weights);
 
-  auto predictions = 1.0/(1.0 + xt::exp(-1 * scores));
-  auto a  = xt::eval(test_labels);
-  auto p =  xt::eval(predictions > .5);
+  auto logits = 1.0/(1.0 + xt::exp(-1 * scores));
+  d_vec actual  = xt::eval(test_labels);
+  b_vec predictions =  xt::eval(logits > .5);
 
-  auto accuracy = xt::mean(xt::isclose(a,p));
+  auto accuracy = xt::mean(xt::isclose(actual,predictions));
   IC(accuracy);
 
   return EXIT_SUCCESS;

@@ -23,7 +23,7 @@
 #include "xtensor/xcsv.hpp"
 #include "icecream.hpp"
 
-using dvec = xt::xarray<double>;
+using d_vec = xt::xarray<double>;
 using t = std::size_t;
 using d = double;
 
@@ -32,11 +32,11 @@ using d = double;
 // @param target training labels
 // @param max_iter int max num iterations 
 // @param learning rate (η or α) double
-// @return weights (1×m) result
-auto logistic_regression(const dvec & features, const dvec & target, t max_iter, d learning_rate) {
-  xt::xarray<d> weights = xt::zeros<d>({features.shape()[1]});
+// @return weights 1-d vector result
+d_vec logistic_regression(const d_vec & features, const d_vec & target, t max_iter, d learning_rate) {
+  d_vec weights = xt::zeros<d>({features.shape()[1]});
   // for early stopping
-  xt::xarray<d> ll_old(1e99);
+  d_vec ll_old(1e99);
   for (t i = 0; i < max_iter; ++i) {
     // initial dot product
     auto scores = xt::linalg::dot(features, weights);

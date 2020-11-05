@@ -10,10 +10,7 @@
 #include "xtensor/xcsv.hpp"
 #include "icecream.hpp"
 
-/* depends:  xtensor xframe xtensor-blas */
-/* apt install libblas-dev liblapack-dev */
-
-using vec = xt::xarray<double>;
+using d_vec = xt::xarray<double>;
 using t = std::size_t;
 using d = double;
-xt::xarray<double> logistic_regression(const vec & features, const vec & target, t num_steps, d learning_rate);
+d_vec logistic_regression(const d_vec & features, const d_vec & target, t num_steps, d learning_rate);
