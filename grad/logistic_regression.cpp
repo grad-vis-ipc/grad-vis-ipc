@@ -1,3 +1,16 @@
+/**
+ *  @file logistic_regression.cpp
+ *  @author Ralph 'Blake' Vente
+ *  @license Mozilla Public License
+ * 
+ *  depends:  xtensor xframe xtensor-blas 
+ *  AND `apt install libblas-dev liblapack-dev`
+ * 
+ *  This Source Code Form is subject to the terms of the Mozilla Public
+ *  License, v. 2.0. If a copy of the MPL was not distributed with this
+ *  file, You can obtain one at https://mozilla.org/MPL/2.0/. 
+ **/
+
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -10,18 +23,21 @@
 #include "xtensor/xcsv.hpp"
 #include "icecream.hpp"
 
-/* depends:  xtensor xframe xtensor-blas */
-/* apt install libblas-dev liblapack-dev */
-
-using vec = xt::xarray<double>;
+using dvec = xt::xarray<double>;
 using t = std::size_t;
 using d = double;
 
-auto logistic_regression(const vec & features, const vec & target, t num_steps, d learning_rate) {
+// Implements logistic regresion
+// @param features training set array<double> with dims (n×m)
+// @param target training labels
+// @param max_iter int max num iterations 
+// @param learning rate (η or α) double
+// @return weights (1×m) result
+auto logistic_regression(const dvec & features, const dvec & target, t max_iter, d learning_rate) {
   xt::xarray<d> weights = xt::zeros<d>({features.shape()[1]});
   // for early stopping
   xt::xarray<d> ll_old(1e99);
-  for (t i = 0; i < num_steps; ++i) {
+  for (t i = 0; i < max_iter; ++i) {
     // initial dot product
     auto scores = xt::linalg::dot(features, weights);
 
