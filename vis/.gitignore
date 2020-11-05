@@ -1,0 +1,8 @@
+/.idea
+/.vs
+/target
+/tmp
+/tmp-alt
+
+capstone.zip
+# Cargo.lock
