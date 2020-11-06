@@ -34,7 +34,7 @@ using d = double;
 // @param learning rate (η or α) double
 // @return weights 1-d vector result
 d_vec logistic_regression(const d_vec& features, const d_vec& target,
-                          t max_iter, d learning_rate) {
+                          const t max_iter, const d learning_rate) {
   d_vec weights = xt::zeros<d>({features.shape()[1]});
   // for early stopping
   d_vec ll_old(1e99);
@@ -55,7 +55,7 @@ d_vec logistic_regression(const d_vec& features, const d_vec& target,
     weights = weights + gradient * learning_rate;
 
     if (i % 1000 == 0) {
-      // log likelihood should decrease
+      // log likelihood should change between iterations
       auto ll = xt::sum(target * (scores)-xt::log(1 + xt::exp(scores)));
       std::cout << i << " " << ll << std::endl;
       if (xt::allclose(ll, ll_old)) {

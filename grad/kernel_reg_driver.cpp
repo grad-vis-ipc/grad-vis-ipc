@@ -6,6 +6,24 @@ using b_vec = xt::xarray<bool>;
 using t = std::size_t;
 using d = double;
 
+auto kernelize(const d_vec& X) {
+  auto kernel_train = xt::eval(X);
+  auto n_cols = X.shape()[1];
+  // append squares: x^2
+  for (t i = 0; i < n_cols - 1; ++i) {
+    auto squares =
+        xt::pow(xt::eval(xt::view(X, xt::all(), xt::range(i, i + 1))), 2);
+    kernel_train = xt::hstack(xt::xtuple(kernel_train, squares));
+  }
+  // append element-wise adjacent pairs: xy
+  for (t i = 0; i < n_cols - 2; ++i) {
+    auto prod = xt::eval(xt::view(X, xt::all(), xt::range(i, i + 1))) *
+                xt::eval(xt::view(X, xt::all(), xt::range(i + 1, i + 2)));
+    kernel_train = xt::hstack(xt::xtuple(kernel_train, prod));
+  }
+  return kernel_train;
+}
+
 int main(const int argc, const char* argv[]) {
   if (argc < 5) {
     std::cout << "Usage: " << argv[0] << " <train> <test> <iterations> <step>"
@@ -32,19 +50,12 @@ int main(const int argc, const char* argv[]) {
   auto test_set =
       xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
 
-  auto new_col = 
-      xt::eval(xt::view(training_set, xt::all(), xt::range(1, 2)));
-  new_col = xt::pow(new_col,2);
-  auto kernel_train = xt::hstack(xt::xtuple(training_set, new_col));
-  IC(kernel_train, kernel_train.shape());
+  auto kernel_train = kernelize(training_set);
+  auto kern_weights =
+      logistic_regression(kernel_train, train_labels, N_ITER, LEARNING_RATE);
 
-  // IC(train_labels, training_set);
-  auto weights =
-      logistic_regression(training_set, train_labels, N_ITER, LEARNING_RATE);
-  IC(weights);
-  IC(weights.shape());
-  auto scores = xt::linalg::dot(xt::eval(test_set), weights);
-  return EXIT_SUCCESS;
+  IC(kernel_train, kernel_train.shape());
+  auto scores = xt::linalg::dot(xt::eval(kernelize(test_set)), kern_weights);
 
   auto logits = 1.0 / (1.0 + xt::exp(-1 * scores));
   d_vec actual = xt::eval(test_labels);
