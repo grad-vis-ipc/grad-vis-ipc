@@ -1,5 +1,6 @@
 FLAGS = -std=c++17 -lblas -fsanitize=address -O -march=native
 MONK_FILE_BASE = data_monks/monks-
+L_RATE?=.001
 
 log_reg.out: logistic_regression.o reg_driver.cpp
 	g++ logistic_regression.o reg_driver.cpp $(FLAGS) -o log_reg.out
@@ -13,9 +14,14 @@ logistic_regression.o: logistic_regression.cpp
 kern1: kern_log_reg.out
 	./kern_log_reg.out data_monks/monks-1.train data_monks/monks-1.test 4800000 0.002
 
-pearson: kern_log_reg.out
-	./kern_log_reg.out data_monks/monks-1.train data_monks/monks-1.test 4800000 0.01
+pearson1: kern_log_reg.out
+	./kern_log_reg.out data_monks/monks-1.train data_monks/monks-1.test 4800000 $(L_RATE)
 
+pearson2: kern_log_reg.out
+	./kern_log_reg.out data_monks/monks-2.train data_monks/monks-2.test 4800000 $(L_RATE)
+
+pearson3: kern_log_reg.out
+	./kern_log_reg.out data_monks/monks-3.train data_monks/monks-3.test 4800000 $(L_RATE)
 
 kern2: kern_log_reg.out
 	./kern_log_reg.out data_monks/monks-2.train data_monks/monks-2.test 4800000 0.0002

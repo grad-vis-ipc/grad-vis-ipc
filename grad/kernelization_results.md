@@ -4,10 +4,12 @@
 | KLR sq & pairs      | 89     | 63.4   | 91     |
 | KLR poly(1+r/2)     | 81.7   | 66.6   | 89.8   |
 
+
 | KLR R alone         | 71.7   | 65.2   | 62.6   |
 | KLR sq              | 71.5   | 63.4   | 96.8   |
 | KLR pairs           | 75     | 63.65  | 77.0   |
 | KLR R (sq & pairs)  | 50     | 67.1   | 66.6   |
+| KLR pairs 10*abs(R) | 74.1   | 67.1   | 77.7   |
 
 
 : Percent Classification Accuracy
