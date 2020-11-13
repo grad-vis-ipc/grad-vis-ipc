@@ -3,6 +3,7 @@
 | Logistic Regression | 66     | 64     | 76     |
 | KLR sq & pairs      | 89     | 63.4   | 91     |
 | KLR poly(1+r/2)     | 81.7   | 66.6   | 89.8   |
+| KLR poly(1+r/2)     | 52.8   | 55.3   | 60.6   |
 
 
 | KLR R alone         | 71.7   | 65.2   | 62.6   |
