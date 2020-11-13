@@ -13,6 +13,10 @@ logistic_regression.o: logistic_regression.cpp
 kern1: kern_log_reg.out
 	./kern_log_reg.out data_monks/monks-1.train data_monks/monks-1.test 4800000 0.002
 
+pearson: kern_log_reg.out
+	./kern_log_reg.out data_monks/monks-1.train data_monks/monks-1.test 4800000 0.01
+
+
 kern2: kern_log_reg.out
 	./kern_log_reg.out data_monks/monks-2.train data_monks/monks-2.test 4800000 0.0002
 

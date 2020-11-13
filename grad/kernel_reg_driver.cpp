@@ -6,22 +6,15 @@ using b_vec = xt::xarray<bool>;
 using t = std::size_t;
 using d = double;
 
-auto pearson_correlation(const d_vec& X, const d_vec& y) {
-  auto n_cols = X.shape()[1];
-  auto correlations = xt::zeros<d>({n_cols});
-  IC(correlations);
-  for (t i = 0; i < n_cols; ++i) {
-    auto x = xt::eval(xt::col(X, i));
-    auto x_norm = x - xt::mean(x);
-    auto y_norm = y - xt::mean(y);
-    auto r_top = xt::sum(x_norm * y_norm);
-    auto r_bottom_x = xt::sqrt(xt::sum(xt::pow(x_norm, 2)));
-    auto r_bottom_y = xt::sqrt(xt::sum(xt::pow(y_norm, 2)));
-    auto r_correlation = r_top / (r_bottom_x * r_bottom_y);
-    IC(r_correlation);
-    // correlations= xt::hstack(xt::xtuple(correlations, r_correlation));
-  }
-  return correlations;
+auto pearson_correlation(const d_vec& x, const d_vec& y) {
+  auto x_norm = x - xt::mean(x);
+  auto y_norm = y - xt::mean(y);
+  auto r_top = xt::sum(x_norm * y_norm);
+  auto r_bottom_x = xt::sqrt(xt::sum(xt::pow(x_norm, 2)));
+  auto r_bottom_y = xt::sqrt(xt::sum(xt::pow(y_norm, 2)));
+  auto r_correlation = r_top / (r_bottom_x * r_bottom_y);
+  IC(r_correlation);
+  return xt::eval(r_correlation);
 }
 
 namespace kern {
@@ -48,12 +41,14 @@ auto pearson_r(const d_vec& X, const d_vec& y) {
   // raise each row to the power of its correlation
   auto kernel_train = xt::eval(X);
   auto n_cols = X.shape()[1];
-  for (t i = 0; i < n_cols - 1; ++i) {
+  for (t i = 0; i < n_cols; ++i) {
+    auto r_val = pearson_correlation(xt::eval(xt::col(X, i)), y);
     auto squares =
-        xt::pow(xt::eval(xt::view(X, xt::all(), xt::range(i, i + 1))), 2);
+        xt::pow(xt::eval(xt::view(X, xt::all(), xt::range(i, i + 1))), 1+r_val/2.0);
     kernel_train = xt::hstack(xt::xtuple(kernel_train, squares));
   }
-  return kernel_train;
+  return xt::eval(
+      xt::view(kernel_train, xt::all(), xt::range(n_cols, 2 * n_cols)));
 }
 
 }  // namespace kern
@@ -77,24 +72,22 @@ int main(const int argc, const char* argv[]) {
   test.close();
 
   auto train_labels = xt::col(training_set_raw, 0);
-  auto training_set =
+  auto train_set =
       xt::view(training_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
 
-  auto test_labels = xt::col(test_set_raw, 0);
+  auto test_labels = xt::eval(xt::col(test_set_raw, 0));
   auto test_set =
       xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
 
-  auto kernel_train = kern::sq_adj_pair(training_set);
-
-  auto x = pearson_correlation(training_set, train_labels);
-  return EXIT_SUCCESS;
+  // auto kernel_train = kern::pearson_r(train_set, train_labels);
+  auto kernel_train = kern::pearson_r(kern::sq_adj_pair(train_set), train_labels);
 
   auto kern_weights =
       logistic_regression(kernel_train, train_labels, N_ITER, LEARNING_RATE);
 
   IC(kernel_train, kernel_train.shape());
-  auto scores =
-      xt::linalg::dot(xt::eval(kern::sq_adj_pair(test_set)), kern_weights);
+  // auto scores = xt::linalg::dot(xt::eval(test_set), kern_weights);
+  auto scores = xt::linalg::dot(kern::pearson_r(kern::sq_adj_pair(test_set), test_labels), kern_weights);
 
   auto logits = 1.0 / (1.0 + xt::exp(-1 * scores));
   d_vec actual = xt::eval(test_labels);
