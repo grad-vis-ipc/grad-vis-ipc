@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 from sklearn.linear_model import LogisticRegression
 import pandas as pd
+import numpy as np
 from icecream import ic
 import sys
 
@@ -13,3 +14,5 @@ clf = LogisticRegression(fit_intercept=False, C = 1e15)
 clf.fit(X_train, y_train)
 ic(clf.coef_)
 ic(clf.score(X_test, y_test))
+for i in range(6):
+  ic(np.corrcoef(X_train[:,i], y_train))

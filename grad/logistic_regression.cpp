@@ -59,7 +59,7 @@ d_vec logistic_regression(const d_vec& features, const d_vec& target,
       auto ll = xt::sum(target * (scores)-xt::log(1 + xt::exp(scores)));
       std::cout << i << " " << ll << std::endl;
       if (xt::allclose(ll, ll_old)) {
-        std::cout << "Early stop" << std::endl;
+        std::cout << "Converged in ≈" << i << " iterations" << std::endl;
         break;
       }
       ll_old = ll;

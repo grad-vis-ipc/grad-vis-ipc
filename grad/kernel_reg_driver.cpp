@@ -6,7 +6,27 @@ using b_vec = xt::xarray<bool>;
 using t = std::size_t;
 using d = double;
 
-auto kernelize(const d_vec& X) {
+auto pearson_correlation(const d_vec& X, const d_vec& y) {
+  auto n_cols = X.shape()[1];
+  auto correlations = xt::zeros<d>({n_cols});
+  IC(correlations);
+  for (t i = 0; i < n_cols; ++i) {
+    auto x = xt::eval(xt::col(X, i));
+    auto x_norm = x - xt::mean(x);
+    auto y_norm = y - xt::mean(y);
+    auto r_top = xt::sum(x_norm * y_norm);
+    auto r_bottom_x = xt::sqrt(xt::sum(xt::pow(x_norm, 2)));
+    auto r_bottom_y = xt::sqrt(xt::sum(xt::pow(y_norm, 2)));
+    auto r_correlation = r_top / (r_bottom_x * r_bottom_y);
+    IC(r_correlation);
+    // correlations= xt::hstack(xt::xtuple(correlations, r_correlation));
+  }
+  return correlations;
+}
+
+namespace kern {
+
+auto sq_adj_pair(const d_vec& X) {
   auto kernel_train = xt::eval(X);
   auto n_cols = X.shape()[1];
   // append squares: x^2
@@ -23,6 +43,20 @@ auto kernelize(const d_vec& X) {
   }
   return kernel_train;
 }
+
+auto pearson_r(const d_vec& X, const d_vec& y) {
+  // raise each row to the power of its correlation
+  auto kernel_train = xt::eval(X);
+  auto n_cols = X.shape()[1];
+  for (t i = 0; i < n_cols - 1; ++i) {
+    auto squares =
+        xt::pow(xt::eval(xt::view(X, xt::all(), xt::range(i, i + 1))), 2);
+    kernel_train = xt::hstack(xt::xtuple(kernel_train, squares));
+  }
+  return kernel_train;
+}
+
+}  // namespace kern
 
 int main(const int argc, const char* argv[]) {
   if (argc < 5) {
@@ -50,16 +84,21 @@ int main(const int argc, const char* argv[]) {
   auto test_set =
       xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
 
-  auto kernel_train = kernelize(training_set);
+  auto kernel_train = kern::sq_adj_pair(training_set);
+
+  auto x = pearson_correlation(training_set, train_labels);
+  return EXIT_SUCCESS;
+
   auto kern_weights =
       logistic_regression(kernel_train, train_labels, N_ITER, LEARNING_RATE);
 
   IC(kernel_train, kernel_train.shape());
-  auto scores = xt::linalg::dot(xt::eval(kernelize(test_set)), kern_weights);
+  auto scores =
+      xt::linalg::dot(xt::eval(kern::sq_adj_pair(test_set)), kern_weights);
 
   auto logits = 1.0 / (1.0 + xt::exp(-1 * scores));
   d_vec actual = xt::eval(test_labels);
-  b_vec predictions = xt::eval(logits > .5);
+  b_vec predictions = logits > .5;
 
   auto accuracy = xt::mean(xt::isclose(actual, predictions));
   IC(accuracy);
