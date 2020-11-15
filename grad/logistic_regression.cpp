@@ -31,7 +31,7 @@ using d = double;
 // @param features training set array<double> with dims (n×m)
 // @param target training labels
 // @param max_iter int max num iterations
-// @param learning rate (η or α) double
+// @param learning_rate (η or α) double
 // @return weights 1-d vector result
 d_vec logistic_regression(const d_vec& features, const d_vec& target,
                           const t max_iter, const d learning_rate) {
@@ -60,6 +60,9 @@ d_vec logistic_regression(const d_vec& features, const d_vec& target,
       std::cout << i << " " << ll << std::endl;
       if (xt::allclose(ll, ll_old)) {
         std::cout << "Converged in ≈" << i << " iterations" << std::endl;
+        break;
+      } else if (xt::any(xt::greater_equal(ll, ll_old))) {
+        std::cout << "Diverged in ≈" << i << " iterations" << std::endl;
         break;
       }
       ll_old = ll;
