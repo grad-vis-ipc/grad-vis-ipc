@@ -34,7 +34,7 @@ void Receive(char * program2){
 }
 
 int main(int argc, char* argv[]){
-    if(argc != 3){
+    if(argc != 4){
         cout << "invalid number of argument " <<endl;
         return -1;
     }

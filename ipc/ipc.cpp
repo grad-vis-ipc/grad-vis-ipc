@@ -19,14 +19,12 @@ void Send(char * program1){
     cout <<"=======================" <<endl;
     cout << "[" << program1 << "] will send data" << endl;
     dup2(GRAD_WRITE , STDOUT_FILENO); /* make output go to pipe */
-    // execv(program1, argv+1);
     execlp(program1, program1, NULL);
 }
 
 /* Program2 receiving input from program1 */
 void Receive(char * program2){
     dup2(GRAD_READ,STDIN_FILENO); /* get input from pipe */
-   // dup2(D3_WRITE, STDOUT_FILENO);
     close(GRAD_WRITE);
     close(D3_READ);
     close(D3_WRITE);
@@ -34,7 +32,8 @@ void Receive(char * program2){
 }
 
 int main(int argc, char* argv[]){
-    if(argc != 2){
+    if(argc != 3){
+        cout << argc <<endl;
         cout << "invalid number of argument " <<endl;
         return -1;
     }
