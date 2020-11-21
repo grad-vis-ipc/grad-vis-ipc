@@ -1,14 +1,3 @@
-/*
-    g++ -o write write.cpp
-    g++ -o read read.cpp
-    g++ -o ipc2 ipc2.cpp
-    ./ipc2 ./write 3 ./read
-
-    rustc rscode.rs
-    g++ -o read read.cpp
-    g++ -o ipc2 ipc2.cpp
-    ./ipc2 ./write 3 ./rscode
-*/
 #include <stdio.h> 
 #include <sys/wait.h>  
 #include <iostream>
@@ -19,19 +8,19 @@ using namespace std;
 #define GRAD_WRITE pipeML3D[1]
 #define D3_READ pipe3DML[0]
 #define D3_WRITE pipe3DML[1]
-//https://blog.eldruin.com/inter-process-communication-pipe-fork-cpp-stl-like-streams/
 
 int pipeML3D[2], pipe3DML[2];
 
 /* Program1 sending output to program2 */
-void Send(char * program1, char*argv[]){
+void Send(char * program1){
     close(GRAD_READ);
     close(D3_READ);
     close(D3_WRITE);
     cout <<"=======================" <<endl;
     cout << "[" << program1 << "] will send data" << endl;
     dup2(GRAD_WRITE , STDOUT_FILENO); /* make output go to pipe */
-    execv(program1, argv+1);
+    // execv(program1, argv+1);
+    execlp(program1, program1, NULL);
 }
 
 /* Program2 receiving input from program1 */
@@ -45,6 +34,10 @@ void Receive(char * program2){
 }
 
 int main(int argc, char* argv[]){
+    if(argc != 2){
+        cout << "invalid number of argument " <<endl;
+        return -1;
+    }
 	int status;     
 
     /* Creating pipes */
@@ -64,7 +57,7 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     else if(pid == 0){ 
-        Send(argv[1],  argv);
+        Send(argv[1]);
     }
     
     pid = fork();
@@ -73,7 +66,7 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
     else if(pid == 0){ 
-        Receive(argv[3]);
+        Receive(argv[2]);
     }
     
     close(GRAD_READ);
