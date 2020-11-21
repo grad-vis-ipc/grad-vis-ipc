@@ -96,7 +96,7 @@ int main(int argc, char* argv[]){
         exit(1);
     }
     else
-        cout << "\n[Successfully attached shared variable to shared memory]" << endl;
+        cout << "[Successfully attached shared variable to shared memory]" << endl;
     sem = sem_open ("write_sem", O_CREAT, 0644, sem_num);
     
     *process_num = 0;
@@ -122,11 +122,16 @@ int main(int argc, char* argv[]){
             break;   
         else{
             pcb* process = new pcb {pid, NULL};
+            kill(pid, SIGSTOP);
+
             Enqueue(process);
+
         }               
     }
     if (pid > 0){ /* Parent Process */ 
+
         while (head != NULL){
+        	kill(head->pid, SIGCONT);
             int endID = waitpid(head->pid, &status, WNOHANG|WUNTRACED);
             if(endID == -1){
                 perror("waitpid error");
@@ -138,10 +143,13 @@ int main(int argc, char* argv[]){
             }
             else{
             	sleep(1);
-            	close(GRAD_READ);
-			    close(GRAD_WRITE);
-			    close(D3_READ);
-			    close(D3_WRITE);
+            	if(*process_num==4){
+            		sleep(1);
+	            	close(GRAD_READ);
+				    close(GRAD_WRITE);
+				    close(D3_READ);
+				    close(D3_WRITE);
+				}
             }
         }
 
@@ -166,7 +174,8 @@ int main(int argc, char* argv[]){
         exit(0);
       
     }
-    else{   /* Child process */        
+    else{   /* Child process */  
+    
          sem_trywait (sem);
          (*process_num)++;
          sem_post (sem);  
