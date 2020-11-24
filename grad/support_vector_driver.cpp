@@ -1,7 +1,7 @@
-#include "support_vector_machine.hpp"
-#include "xtensor/xadapt.hpp"
 #include "kernels.cpp"
 #include "stats.cpp"
+#include "support_vector_machine.hpp"
+#include "xtensor/xadapt.hpp"
 
 int main(const int argc, const char* argv[]) {
   if (argc < 5) {
@@ -29,19 +29,27 @@ int main(const int argc, const char* argv[]) {
   auto test_set = xt::eval(
       xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_)));
 
-  auto kernel_train = kern::pearson_r(train_set, train_labels);
+  // auto svm_train_labels = 2 * train_labels - xt::ones_like(train_labels);
+  // auto svm_train_set = train_set;
 
-  auto svm_weights =
-      support_vector_machine(kernel_train, train_labels, N_ITER, LEARNING_RATE);
+  // d_vec predictions = xt::linalg::dot(xt::eval(test_set), svm_weights);
+  // IC(predictions);
 
-  // IC(kernel_train, kernel_train.shape());
+  // d_vec actual = xt::eval(test_labels);
+  // auto accuracy = xt::mean(xt::isclose(actual, predictions));
+  // IC(accuracy);
 
-  // use weights to generate predictions
-  auto scores = xt::linalg::dot(test_set, svm_weights);
-  b_vec predictions = scores > 0;
+  auto svm_train_labels = xt::xarray<double>({-1, -1, 1, 1});
+  // auto svm_train_set = xt::xarray<double>({{1, -1}, {0, 0}, {1, 1}, {2, 0}});
+  auto svm_train_set = xt::xarray<double>({{1, -1.5}, {0, -.5}, {1, .5}, {2, -1.5}});
 
-  auto accuracy = xt::mean(xt::isclose(test_labels, predictions));
-  IC(accuracy);
+  auto svm_weights = support_vector_machine(svm_train_set, svm_train_labels,
+                                            N_ITER, LEARNING_RATE);
+
+  IC(svm_weights);
+
+  d_vec predictions = xt::linalg::dot(d_vec({{2, 2}, {-1, -1}}), svm_weights);
+  IC(predictions);
 
   return EXIT_SUCCESS;
 }

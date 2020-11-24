@@ -23,10 +23,10 @@ support_vector_machine.o: support_vector_machine.cpp
 	g++ -c support_vector_machine.cpp $(FLAGS)
 
 svm: svm.out
-	./svm.out $(MONK_FILE_BASE)1.train $(MONK_FILE_BASE)1.test 400000 $(L_RATE)
+	./svm.out $(MONK_FILE_BASE)1.train $(MONK_FILE_BASE)1.test $(MX_ITER) $(L_RATE)
 
 pearson: kern_log_reg.out
-	./kern_log_reg.out $(MONK_FILE_BASE)$(D_SET).train $(MONK_FILE_BASE)$(D_SET).test 400000 $(L_RATE)
+	./kern_log_reg.out $(MONK_FILE_BASE)$(D_SET).train $(MONK_FILE_BASE)$(D_SET).test $(MX_ITER) $(L_RATE)
 
 kern: kern_log_reg.out
 	./kern_log_reg.out $(MONK_FILE_BASE)$(D_SET).train $(MONK_FILE_BASE)$(D_SET).test $(MX_ITER) $(L_RATE)
