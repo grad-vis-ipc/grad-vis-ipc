@@ -1,19 +1,27 @@
 use crate::{
     bind_merge::BindGroupBuilder,
     instruction::Instruction,
-    renderer::{BUFFER_RECALL_PRIORITY, COMPUTE_POOL},
+    list::{RenderList, RenderPassRunRate},
+    renderer::{
+        list, list::OutputFrame, uniforms::WrappedUniform, RendererMode, BUFFER_RECALL_PRIORITY, COMPUTE_POOL,
+        RENDER_RECORD_PRIORITY,
+    },
     statistics::RendererStatistics,
     Renderer,
 };
-use std::{future::Future, sync::Arc};
+use futures::{stream::FuturesOrdered, StreamExt};
+use std::{borrow::Cow, future::Future, sync::Arc};
 use tracing_futures::Instrument;
 use wgpu::{
-    Color, CommandEncoderDescriptor, Extent3d, LoadOp, Operations, Origin3d, RenderPassColorAttachmentDescriptor,
-    RenderPassDepthStencilAttachmentDescriptor, RenderPassDescriptor, TextureAspect, TextureCopyView,
-    TextureDataLayout, TextureDescriptor, TextureDimension, TextureUsage, TextureViewDescriptor, TextureViewDimension,
+    BindingResource, CommandEncoderDescriptor, Extent3d, Maintain, Origin3d, ShaderModuleSource, SwapChainError,
+    TextureAspect, TextureCopyView, TextureDataLayout, TextureDescriptor, TextureDimension, TextureUsage,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
-pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Output = RendererStatistics> {
+pub fn render_loop<TLD: 'static>(
+    renderer: Arc<Renderer<TLD>>,
+    render_list: RenderList,
+) -> impl Future<Output = RendererStatistics> {
     span_transfer!(_ -> render_create_span, INFO, "Render Loop Creation");
 
     // blocks, do it before we async
@@ -23,18 +31,17 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
     async move {
         let mut instructions = renderer.instructions.consumer.lock();
 
+        span_transfer!(_ -> event_span, INFO, "Process events");
+
         let mut encoder = renderer.device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("primary encoder"),
         });
-
-        span_transfer!(_ -> event_span, INFO, "Process events");
 
         let mut new_options = None;
 
         let mut mesh_manager = renderer.mesh_manager.write();
         let mut texture_manager_2d = renderer.texture_manager_2d.write();
         let mut texture_manager_cube = renderer.texture_manager_cube.write();
-        let mut texture_manager_internal = renderer.texture_manager_internal.write();
         let mut material_manager = renderer.material_manager.write();
         let mut object_manager = renderer.object_manager.write();
         let mut directional_light_manager = renderer.directional_light_manager.write();
@@ -43,7 +50,14 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
         for cmd in instructions.drain(..) {
             match cmd {
                 Instruction::AddMesh { handle, mesh } => {
-                    mesh_manager.fill(&renderer.queue, handle, mesh);
+                    mesh_manager.fill(
+                        &renderer.device,
+                        &renderer.queue,
+                        &renderer.gpu_copy,
+                        &mut encoder,
+                        handle,
+                        mesh,
+                    );
                 }
                 Instruction::RemoveMesh { handle } => {
                     mesh_manager.remove(handle);
@@ -146,10 +160,17 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
                     texture_manager_cube.remove(handle);
                 }
                 Instruction::AddMaterial { handle, material } => {
-                    material_manager.fill(handle, material);
+                    material_manager.fill(
+                        &renderer.device,
+                        renderer.mode,
+                        &mut texture_manager_2d,
+                        &global_resources.material_bgl,
+                        handle,
+                        material,
+                    );
                 }
                 Instruction::ChangeMaterial { handle, change } => {
-                    material_manager.get_mut(handle).update_from_changes(change)
+                    material_manager.update_from_changes(&renderer.queue, &texture_manager_2d, handle, change);
                 }
                 Instruction::RemoveMaterial { handle } => {
                     material_manager.remove(handle);
@@ -167,13 +188,7 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
                     object_manager.remove(handle);
                 }
                 Instruction::AddDirectionalLight { handle, light } => {
-                    directional_light_manager.fill(
-                        &renderer.device,
-                        &mut texture_manager_internal,
-                        &global_resources.uniform_bgl,
-                        handle,
-                        light,
-                    );
+                    directional_light_manager.fill(handle, light);
                 }
                 Instruction::ChangeDirectionalLight { handle, change } => {
                     // TODO: Move these inside the managers
@@ -184,6 +199,18 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
                     }
                 }
                 Instruction::RemoveDirectionalLight { handle } => directional_light_manager.remove(handle),
+                Instruction::AddBinaryShader { handle, shader } => {
+                    let module = renderer
+                        .device
+                        .create_shader_module(ShaderModuleSource::SpirV(Cow::Owned(shader)));
+                    renderer.shader_manager.insert(handle, Arc::new(module));
+                }
+                Instruction::RemoveShader { handle } => {
+                    renderer.shader_manager.remove(handle);
+                }
+                Instruction::RemovePipeline { handle } => {
+                    renderer.pipeline_manager.remove(handle);
+                }
                 Instruction::SetOptions { options } => new_options = Some(options),
                 Instruction::SetCameraLocation { location } => {
                     global_resources.camera.set_location(location);
@@ -197,25 +224,53 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
             }
         }
 
-        let mut general_bgb = BindGroupBuilder::new(Some(String::from("general bg")));
+        renderer
+            .render_list_cache
+            .write()
+            .add_render_list(&renderer.device, render_list.resources);
 
         let (texture_2d_bgl, texture_2d_bg, texture_2d_bgl_dirty) = texture_manager_2d.ready(&renderer.device);
         let (texture_cube_bgl, texture_cube_bg, texture_cube_bgl_dirty) = texture_manager_cube.ready(&renderer.device);
-        let (texture_internal_bgl, texture_internal_bg, texture_internal_bgl_dirty) =
-            texture_manager_internal.ready(&renderer.device);
         material_manager.ready(&renderer.device, &mut encoder, &texture_manager_2d);
         let object_count = object_manager.ready(&renderer.device, &mut encoder, &material_manager);
-        directional_light_manager.ready(&renderer.device, &mut encoder, &texture_manager_internal);
+        directional_light_manager.ready(&renderer.device, &mut encoder);
 
-        object_manager.append_to_bgb(&mut general_bgb);
-        material_manager.append_to_bgb(&mut general_bgb);
+        let object_input_bg = renderer.mode.into_data(
+            || (),
+            || {
+                let mut object_input_bgb = BindGroupBuilder::new(Some(String::from("object input bg")));
+                object_manager.gpu_append_to_bgb(&mut object_input_bgb);
+                object_input_bgb.build(&renderer.device, &global_resources.object_input_bgl)
+            },
+        );
+
+        let mut general_bgb = BindGroupBuilder::new(Some(String::from("general bg")));
         global_resources.append_to_bgb(&mut general_bgb);
-        directional_light_manager.append_to_bgb(&mut general_bgb);
-
         let general_bg = general_bgb.build(&renderer.device, &global_resources.general_bgl);
 
+        let material_bg = renderer.mode.into_data(
+            || (),
+            || {
+                let mut material_bgb = BindGroupBuilder::new(Some(String::from("material bg")));
+                material_manager.gpu_append_to_bgb(&mut material_bgb);
+                material_bgb.build(&renderer.device, &global_resources.material_bgl)
+            },
+        );
+
+        let mut shadow_bgb = BindGroupBuilder::new(Some(String::from("shadow bg")));
+        directional_light_manager.append_to_bgb(&mut shadow_bgb);
+        let shadow_bg = shadow_bgb.build(&renderer.device, &global_resources.shadow_texture_bgl);
+
+        let skybox_texture_view = if let Some(ref sky) = global_resources.background_texture {
+            texture_manager_cube.get_view(*sky)
+        } else {
+            texture_manager_cube.get_null_view()
+        };
+        let mut skybox_bgb = BindGroupBuilder::new(Some(String::from("skybox bg")));
+        skybox_bgb.append(BindingResource::TextureView(skybox_texture_view));
+        let skybox_bg = skybox_bgb.build(&renderer.device, &global_resources.skybox_bgl);
+
         drop((
-            global_resources,
             mesh_manager,
             texture_manager_2d,
             texture_manager_cube,
@@ -227,7 +282,7 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
         span_transfer!(event_span -> resource_update_span, INFO, "Update resources");
 
         if let Some(new_opt) = new_options {
-            renderer.global_resources.write().update(
+            global_resources.update(
                 &renderer.device,
                 &renderer.surface,
                 &mut renderer.options.write(),
@@ -235,200 +290,202 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
             );
         }
 
+        drop(global_resources);
+
         let global_resources = renderer.global_resources.read();
-
-        let forward_pass_data =
-            renderer
-                .forward_pass_set
-                .prepare(&renderer, &global_resources, &global_resources.camera, object_count);
-
-        let shadow_passes_data: Vec<_> = renderer
-            .directional_light_manager
-            .read()
-            .values()
-            .map(|light| {
-                light
-                    .shadow_pass_set
-                    .prepare(&renderer, &global_resources, &light.camera, object_count)
-            })
-            .collect();
-
-        if texture_2d_bgl_dirty {
-            renderer.depth_pass.write().update_pipeline(
-                &renderer.device,
-                &global_resources.general_bgl,
-                &global_resources.object_output_noindirect_bgl,
-                &texture_2d_bgl,
-            );
-        }
-
-        if texture_2d_bgl_dirty || texture_internal_bgl_dirty {
-            renderer.opaque_pass.write().update_pipeline(
-                &renderer.device,
-                &global_resources.general_bgl,
-                &global_resources.object_output_noindirect_bgl,
-                &texture_2d_bgl,
-                &texture_internal_bgl,
-            );
-        }
-
-        if texture_cube_bgl_dirty {
-            renderer.skybox_pass.write().update_pipeline(
-                &renderer.device,
-                &global_resources.general_bgl,
-                &global_resources.object_output_noindirect_bgl,
-                &texture_cube_bgl,
-            );
-        }
-
-        span_transfer!(resource_update_span -> compute_pass_span, INFO, "Primary ComputePass");
-
-        let mesh_manager = renderer.mesh_manager.read();
-        let (vertex_buffer, index_buffer) = mesh_manager.buffers();
         let object_manager = renderer.object_manager.read();
         let directional_light_manager = renderer.directional_light_manager.read();
 
-        let mut cpass = encoder.begin_compute_pass();
-        renderer
-            .forward_pass_set
-            .compute(&renderer.culling_pass, &mut cpass, &general_bg, &forward_pass_data);
-        for (light, data) in directional_light_manager.values().zip(&shadow_passes_data) {
-            light
-                .shadow_pass_set
-                .compute(&renderer.culling_pass, &mut cpass, &general_bg, data)
-        }
-        drop(cpass);
+        let mut command_buffer_futures = FuturesOrdered::new();
 
-        span_transfer!(compute_pass_span -> render_pass_span, INFO, "Primary Renderpass");
-
-        drop(global_resources);
-
-        let frame = renderer.global_resources.write().swapchain.get_current_frame().unwrap();
-
-        let global_resources = renderer.global_resources.read();
-        let texture_manager_cube = renderer.texture_manager_cube.read();
-        let material_manager = renderer.material_manager.read();
-        let depth_pass = renderer.depth_pass.read();
-        let skybox_pass = renderer.skybox_pass.read();
-        let opaque_pass = renderer.opaque_pass.read();
-
-        let background_texture = global_resources
-            .background_texture
-            .map(|handle| texture_manager_cube.internal_index(handle) as u32);
-
-        drop(texture_manager_cube);
-
-        let texture_manager_2d = renderer.texture_manager_2d.read();
-
-        for (light, data) in directional_light_manager.values().zip(&shadow_passes_data) {
-            let attachment = texture_manager_internal.get_view(light.shadow_tex.unwrap());
-            let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-                color_attachments: &[],
-                depth_stencil_attachment: Some(RenderPassDepthStencilAttachmentDescriptor {
-                    attachment,
-                    depth_ops: Some(Operations {
-                        load: LoadOp::Clear(1.0),
-                        store: true,
-                    }),
-                    stencil_ops: None,
-                }),
-            });
-
-            light.shadow_pass_set.render(
-                &depth_pass,
-                &mut rpass,
-                vertex_buffer,
-                index_buffer,
-                &general_bg,
-                &texture_2d_bg,
-                data,
+        for light in directional_light_manager.values() {
+            let mut cull_data = renderer.culling_pass.prepare(
+                &renderer.device,
+                renderer.mode,
+                &global_resources.prefix_sum_bgl,
+                &global_resources.pre_cull_bgl,
+                &global_resources.object_output_bgl,
+                object_count as _,
+                String::from("shadow pass"),
             );
 
-            drop(rpass);
+            let mut object_bgb = BindGroupBuilder::new(Some(String::from("object bg")));
+            object_bgb.append(BindingResource::Buffer(cull_data.output_buffer.slice(..)));
+            let object_bg = object_bgb.build(&renderer.device, &global_resources.object_data_bgl);
+
+            let uniform = WrappedUniform::new(&renderer.device, &global_resources.camera_data_bgl);
+            uniform.upload(&renderer.queue, &light.camera);
+
+            match renderer.mode {
+                RendererMode::CPUPowered => {
+                    renderer
+                        .culling_pass
+                        .cpu_run(
+                            &renderer.yard,
+                            &renderer.queue,
+                            &object_manager,
+                            &mut cull_data,
+                            light.camera.clone(),
+                        )
+                        .await;
+                }
+                RendererMode::GPUPowered => {
+                    let mut cpass = encoder.begin_compute_pass();
+
+                    renderer.culling_pass.gpu_run(
+                        &mut cpass,
+                        object_input_bg.as_gpu(),
+                        &uniform.uniform_bg,
+                        &cull_data,
+                    );
+
+                    drop(cpass);
+                }
+            }
+
+            let binding_data = list::BindingData {
+                general_bg: Arc::clone(&general_bg),
+                object_bg: Arc::clone(&object_bg),
+                material_bg: material_bg.as_ref().map(|_| (), Arc::clone),
+                gpu_2d_textures_bg: texture_2d_bg.as_ref().map(|_| (), Arc::clone),
+                gpu_cube_textures_bg: texture_cube_bg.as_ref().map(|_| (), Arc::clone),
+                shadow_texture_bg: Arc::clone(&shadow_bg),
+                skybox_texture_bg: Arc::clone(&skybox_bg),
+                wrapped_uniform: Arc::new(uniform),
+            };
+
+            let cull_data_arc = Arc::new(cull_data);
+
+            for render_pass in &render_list.passes {
+                if render_pass.desc.run_rate != RenderPassRunRate::PerShadow {
+                    continue;
+                }
+
+                let output = directional_light_manager.get_layer_view_arc(light.shadow_tex);
+
+                command_buffer_futures.push(renderer.yard.spawn(
+                    COMPUTE_POOL,
+                    RENDER_RECORD_PRIORITY,
+                    list::render_single_render_pass(
+                        Arc::clone(&renderer),
+                        render_pass.clone(),
+                        OutputFrame::Shadow(output),
+                        Arc::clone(&cull_data_arc),
+                        binding_data.clone(),
+                    ),
+                ));
+            }
         }
 
-        drop(texture_manager_2d);
+        drop(directional_light_manager);
 
-        let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-            color_attachments: &[
-                RenderPassColorAttachmentDescriptor {
-                    attachment: &global_resources.color_texture_view,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::BLACK),
-                        store: true,
-                    },
-                    resolve_target: None,
-                },
-                RenderPassColorAttachmentDescriptor {
-                    attachment: &global_resources.normal_texture_view,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::BLACK),
-                        store: true,
-                    },
-                    resolve_target: None,
-                },
-            ],
-            depth_stencil_attachment: Some(RenderPassDepthStencilAttachmentDescriptor {
-                attachment: &global_resources.depth_texture_view,
-                depth_ops: Some(Operations {
-                    load: LoadOp::Clear(0.0),
-                    store: true,
-                }),
-                stencil_ops: None,
-            }),
-        });
-
-        renderer.forward_pass_set.render(
-            &depth_pass,
-            &skybox_pass,
-            &opaque_pass,
-            &mut rpass,
-            vertex_buffer,
-            index_buffer,
-            &general_bg,
-            &texture_2d_bg,
-            &texture_cube_bg,
-            &texture_internal_bg,
-            &forward_pass_data,
-            background_texture,
-        );
-
-        drop(rpass);
-
-        drop((
-            opaque_pass,
-            depth_pass,
-            object_manager,
-            material_manager,
-            mesh_manager,
-            directional_light_manager,
-        ));
-
-        span_transfer!(render_pass_span -> blit_span, INFO, "Blit to Swapchain");
-
-        let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-            color_attachments: &[RenderPassColorAttachmentDescriptor {
-                attachment: &frame.output.view,
-                ops: Operations {
-                    load: LoadOp::Clear(Color::BLACK),
-                    store: true,
-                },
-                resolve_target: None,
-            }],
-            depth_stencil_attachment: None,
-        });
-
-        renderer.swapchain_blit_pass.run(&mut rpass, &global_resources.color_bg);
-
-        drop(rpass);
-
+        // In wgpu 0.6, get_current_frame erroneously requires &mut
         drop(global_resources);
 
-        span_transfer!(blit_span -> queue_submit_span, INFO, "Submitting to Queue");
+        let mut frame = None;
+        while frame.is_none() {
+            match renderer.global_resources.write().swapchain.get_current_frame() {
+                Ok(v) => frame = Some(v),
+                Err(SwapChainError::Timeout) => {}
+                Err(err) => panic!("Could not make swapchain: {}", err),
+            }
+        }
 
-        renderer.device.poll(wgpu::Maintain::Wait);
+        let global_resources = renderer.global_resources.read();
 
-        renderer.queue.submit(std::iter::once(encoder.finish()));
+        let frame = Arc::new(frame.unwrap());
+
+        {
+            let mut cull_data = renderer.culling_pass.prepare(
+                &renderer.device,
+                renderer.mode,
+                &global_resources.prefix_sum_bgl,
+                &global_resources.pre_cull_bgl,
+                &global_resources.object_output_bgl,
+                object_count as _,
+                String::from("camera pass"),
+            );
+
+            let mut object_bgb = BindGroupBuilder::new(Some(String::from("object bg")));
+            object_bgb.append(BindingResource::Buffer(cull_data.output_buffer.slice(..)));
+            let object_bg = object_bgb.build(&renderer.device, &global_resources.object_data_bgl);
+
+            let uniform = WrappedUniform::new(&renderer.device, &global_resources.camera_data_bgl);
+            uniform.upload(&renderer.queue, &global_resources.camera);
+
+            match renderer.mode {
+                RendererMode::CPUPowered => {
+                    renderer
+                        .culling_pass
+                        .cpu_run(
+                            &renderer.yard,
+                            &renderer.queue,
+                            &object_manager,
+                            &mut cull_data,
+                            global_resources.camera.clone(),
+                        )
+                        .await;
+                }
+                RendererMode::GPUPowered => {
+                    let mut cpass = encoder.begin_compute_pass();
+
+                    renderer.culling_pass.gpu_run(
+                        &mut cpass,
+                        object_input_bg.as_gpu(),
+                        &uniform.uniform_bg,
+                        &cull_data,
+                    );
+
+                    drop(cpass);
+                }
+            }
+
+            let binding_data = list::BindingData {
+                general_bg: Arc::clone(&general_bg),
+                object_bg: Arc::clone(&object_bg),
+                material_bg: material_bg.as_ref().map(|_| (), Arc::clone),
+                gpu_2d_textures_bg: texture_2d_bg.as_ref().map(|_| (), Arc::clone),
+                gpu_cube_textures_bg: texture_cube_bg.as_ref().map(|_| (), Arc::clone),
+                shadow_texture_bg: Arc::clone(&shadow_bg),
+                skybox_texture_bg: Arc::clone(&skybox_bg),
+                wrapped_uniform: Arc::new(uniform),
+            };
+
+            let cull_data_arc = Arc::new(cull_data);
+
+            for render_pass in &render_list.passes {
+                if render_pass.desc.run_rate != RenderPassRunRate::Once {
+                    continue;
+                }
+
+                command_buffer_futures.push(renderer.yard.spawn(
+                    COMPUTE_POOL,
+                    RENDER_RECORD_PRIORITY,
+                    list::render_single_render_pass(
+                        Arc::clone(&renderer),
+                        render_pass.clone(),
+                        OutputFrame::Swapchain(Arc::clone(&frame)),
+                        Arc::clone(&cull_data_arc),
+                        binding_data.clone(),
+                    ),
+                ));
+            }
+        }
+
+        drop((object_manager, global_resources));
+
+        span_transfer!(resource_update_span -> _);
+
+        let mut command_buffers = vec![encoder.finish()];
+
+        while let Some(buffer) = command_buffer_futures.next().await {
+            command_buffers.push(buffer);
+        }
+
+        span_transfer!(_ -> queue_submit_span, INFO, "Submitting to Queue");
+
+        renderer.device.poll(Maintain::Wait);
+        renderer.queue.submit(command_buffers);
 
         span_transfer!(queue_submit_span -> buffer_pump_span, INFO, "Pumping Buffers");
 
@@ -441,7 +498,6 @@ pub fn render_loop<TLD: 'static>(renderer: Arc<Renderer<TLD>>) -> impl Future<Ou
         }
 
         span_transfer!(buffer_pump_span -> present_span, INFO, "Presenting");
-
         drop(frame); //
 
         span_transfer!(present_span -> drop_span, INFO, "Dropping loop data");
