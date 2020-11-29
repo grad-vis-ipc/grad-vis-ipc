@@ -817,9 +817,9 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.11.0"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5a647a31acdc1d622b47ad052dd3cdf435046e09183a00aef0368943a70eee3"
+checksum = "579160312273c954cc51bd440f059dde741029ac8daf8c84fece76cb77f62c15"
 dependencies = [
  "version_check",
 ]
@@ -846,6 +846,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5aca5565f760fb5b220e499d72710ed156fdb74e631659e99377d9ebfbd13ae8"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "hexasphere"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e456943feb7dfc0714363293addda89d76a897c0c155d87eb0ff222818ac7f8"
+dependencies = [
+ "glam",
+ "lazy_static",
 ]
 
 [[package]]
@@ -1702,28 +1712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scene-viewer"
-version = "0.1.0"
-dependencies = [
- "ddsfile",
- "fnv",
- "futures",
- "glam",
- "image",
- "imgui",
- "imgui-winit-support",
- "obj",
- "pico-args",
- "rend3",
- "smallvec",
- "switchyard",
- "tracing",
- "wgpu",
- "wgpu-subscriber",
- "winit",
-]
-
-[[package]]
 name = "scoped-tls"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2162,6 +2150,29 @@ name = "version_check"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5a972e5669d67ba988ce3dc826706fb0a8b01471c088cb0b6110b805cc36aed"
+
+[[package]]
+name = "visualizer"
+version = "0.1.0"
+dependencies = [
+ "ddsfile",
+ "fnv",
+ "futures",
+ "glam",
+ "hexasphere",
+ "image",
+ "imgui",
+ "imgui-winit-support",
+ "obj",
+ "pico-args",
+ "rend3",
+ "smallvec",
+ "switchyard",
+ "tracing",
+ "wgpu",
+ "wgpu-subscriber",
+ "winit",
+]
 
 [[package]]
 name = "walkdir"
