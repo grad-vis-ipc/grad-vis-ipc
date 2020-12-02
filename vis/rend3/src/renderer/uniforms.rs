@@ -1,12 +1,9 @@
-use crate::{
-    bind_merge::BindGroupBuilder,
-    renderer::{camera::Camera, frustum::ShaderFrustum},
-};
+use crate::renderer::{camera::Camera, frustum::ShaderFrustum};
 use glam::Mat4;
 use std::mem::size_of;
 use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, Buffer, BufferAddress, BufferDescriptor,
-    BufferUsage, Device, Queue,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, Buffer, BufferAddress,
+    BufferDescriptor, BufferUsage, Device, Queue,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -42,19 +39,14 @@ impl WrappedUniform {
             layout: uniform_bgl,
             entries: &[BindGroupEntry {
                 binding: 0,
-                resource: buffer.as_entire_binding(),
+                resource: BindingResource::Buffer(buffer.slice(..)),
             }],
         });
 
         Self { buffer, uniform_bg }
     }
 
-    pub fn upload<'a>(
-        &'a self,
-        queue: &Queue,
-        camera: &Camera,
-        object_output_noindirect_bgb: &mut BindGroupBuilder<'a>,
-    ) {
+    pub fn upload<'a>(&'a self, queue: &Queue, camera: &Camera) {
         span_transfer!(_ -> upload_span, WARN, "Uploading WrappedUniform");
 
         let view = camera.view();
@@ -68,10 +60,5 @@ impl WrappedUniform {
         };
 
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&uniforms));
-
-        object_output_noindirect_bgb.append(BindGroupEntry {
-            binding: 0,
-            resource: self.buffer.as_entire_binding(),
-        });
     }
 }

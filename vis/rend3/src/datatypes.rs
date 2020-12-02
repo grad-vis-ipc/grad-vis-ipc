@@ -1,14 +1,16 @@
+use crate::list::{ImageFormat, RenderPassRunRate};
 use glam::{
     f32::{Vec3A, Vec4},
     Mat4, Vec2, Vec3,
 };
-use smallvec::SmallVec;
-use std::num::NonZeroU32;
 use wgpu::TextureFormat;
+pub use wgpu::{Color as ClearColor, LoadOp as PipelineLoadOp};
 
+#[macro_export]
+#[doc(hidden)]
 macro_rules! declare_handle {
     ($($name:ident),*) => {$(
-        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
         pub struct $name(pub(crate) usize);
 
         impl $name {
@@ -24,7 +26,9 @@ declare_handle!(
     TextureHandle,
     MaterialHandle,
     ObjectHandle,
-    DirectionalLightHandle
+    DirectionalLightHandle,
+    ShaderHandle,
+    PipelineHandle
 );
 
 // Consider:
@@ -44,7 +48,6 @@ pub struct ModelVertex {
     pub normal: Vec3,   // 12..24
     pub uv: Vec2,       // 24..32
     pub color: [u8; 4], // 32..36
-    pub material: u32,  // 36..40
 }
 
 unsafe impl bytemuck::Zeroable for ModelVertex {}
@@ -240,6 +243,7 @@ impl Default for AlbedoComponent {
 impl AlbedoComponent {
     pub(crate) fn to_value(&self) -> Vec4 {
         match *self {
+            Self::Vertex { .. } => Vec4::splat(1.0),
             Self::Value(value) => value,
             Self::ValueVertex { value, .. } => value,
             _ => Vec4::default(),
@@ -249,20 +253,25 @@ impl AlbedoComponent {
     pub(crate) fn to_flags(&self) -> MaterialFlags {
         match *self {
             Self::None => MaterialFlags::empty(),
-            Self::Vertex { srgb: false } => MaterialFlags::ALBEDO_ACTIVE | MaterialFlags::ALBEDO_VERTEX_SRGB,
-            Self::Vertex { srgb: true } | Self::Value(_) | Self::Texture(_) => MaterialFlags::ALBEDO_ACTIVE,
-            Self::ValueVertex { srgb: false, .. } | Self::TextureVertex { srgb: false, .. } => {
-                MaterialFlags::ALBEDO_ACTIVE | MaterialFlags::ALBEDO_BLEND
-            }
-            Self::ValueVertex { srgb: true, .. } | Self::TextureVertex { srgb: true, .. } => {
+            Self::Value(_) | Self::Texture(_) => MaterialFlags::ALBEDO_ACTIVE,
+            Self::Vertex { srgb: false }
+            | Self::ValueVertex { srgb: false, .. }
+            | Self::TextureVertex { srgb: false, .. } => MaterialFlags::ALBEDO_ACTIVE | MaterialFlags::ALBEDO_BLEND,
+            Self::Vertex { srgb: true }
+            | Self::ValueVertex { srgb: true, .. }
+            | Self::TextureVertex { srgb: true, .. } => {
                 MaterialFlags::ALBEDO_ACTIVE | MaterialFlags::ALBEDO_BLEND | MaterialFlags::ALBEDO_VERTEX_SRGB
             }
         }
     }
 
-    pub(crate) fn to_texture<Func>(&self, func: Func) -> Option<NonZeroU32>
+    pub(crate) fn is_texture(&self) -> bool {
+        matches!(*self, Self::Texture(..) | Self::TextureVertex { .. })
+    }
+
+    pub(crate) fn to_texture<Func, Out>(&self, func: Func) -> Option<Out>
     where
-        Func: FnOnce(TextureHandle) -> NonZeroU32,
+        Func: FnOnce(TextureHandle) -> Out,
     {
         match *self {
             Self::None | Self::Vertex { .. } | Self::Value(_) | Self::ValueVertex { .. } => None,
@@ -292,9 +301,13 @@ impl<T: Copy> MaterialComponent<T> {
         }
     }
 
-    pub(crate) fn to_texture<Func>(&self, func: Func) -> Option<NonZeroU32>
+    pub(crate) fn is_texture(&self) -> bool {
+        matches!(*self, Self::Texture(..))
+    }
+
+    pub(crate) fn to_texture<Func, Out>(&self, func: Func) -> Option<Out>
     where
-        Func: FnOnce(TextureHandle) -> NonZeroU32,
+        Func: FnOnce(TextureHandle) -> Out,
     {
         match *self {
             Self::None | Self::Value(_) => None,
@@ -325,7 +338,7 @@ changeable_struct! {
 #[derive(Debug, Clone)]
 pub struct Object {
     pub mesh: MeshHandle,
-    pub materials: SmallVec<[MaterialHandle; 4]>,
+    pub material: MaterialHandle,
     pub transform: AffineTransform,
 }
 
@@ -343,4 +356,59 @@ changeable_struct! {
         pub intensity: f32,
         pub direction: Vec3,
     }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PipelineInputType {
+    FullscreenTriangle,
+    Models3d,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PipelineBindingType {
+    GeneralData,
+    ObjectData,
+    GPUMaterial,
+    CPUMaterial,
+    CameraData,
+    GPU2DTextures,
+    GPUCubeTextures,
+    ShadowTexture,
+    SkyboxTexture,
+    Custom2DTexture { count: usize },
+    CustomCubeTexture { count: usize },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum DepthCompare {
+    Closer,
+    CloserEqual,
+    Equal,
+    Further,
+    FurtherEqual,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct PipelineOutputAttachment {
+    pub format: ImageFormat,
+    pub write: bool,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct PipelineDepthState {
+    pub format: ImageFormat,
+    pub compare: DepthCompare,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pipeline {
+    // TODO: Alpha
+    pub run_rate: RenderPassRunRate,
+    pub input: PipelineInputType,
+    pub outputs: Vec<PipelineOutputAttachment>,
+    pub depth: Option<PipelineDepthState>,
+    pub vertex: ShaderHandle,
+    pub fragment: Option<ShaderHandle>,
+    pub bindings: Vec<PipelineBindingType>,
+    pub samples: u8,
 }

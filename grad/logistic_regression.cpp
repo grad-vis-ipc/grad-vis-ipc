@@ -62,7 +62,7 @@ d_vec logistic_regression(const d_vec& features, const d_vec& target,
         std::cout << "Converged in ≈" << i << " iterations" << std::endl;
         break;
       } else if (xt::any(xt::greater_equal(ll, ll_old))) {
-        std::cout << "Diverged in ≈" << i << " iterations" << std::endl;
+        std::cout << "Diverged by ≈" << i << " iterations" << std::endl;
         break;
       }
       ll_old = ll;

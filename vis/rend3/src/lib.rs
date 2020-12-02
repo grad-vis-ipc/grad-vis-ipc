@@ -1,3 +1,8 @@
+//! Easy to use, customizable, efficient 3D renderer library built on wgpu.
+//!
+//! Library is currently under heavy development and teh api will rapidly change
+//! as things are factored.
+
 #[macro_export]
 macro_rules! span {
     ($guard_name:tt, $level:ident, $name:expr, $($fields:tt)*) => {
@@ -42,11 +47,12 @@ macro_rules! span_transfer {
 mod bind_merge;
 pub mod datatypes;
 mod instruction;
+pub mod list;
 mod options;
 mod registry;
 mod renderer;
 mod statistics;
 
 pub use options::*;
-pub use renderer::{error::*, Renderer};
+pub use renderer::{error::*, Renderer, RendererMode};
 pub use statistics::*;

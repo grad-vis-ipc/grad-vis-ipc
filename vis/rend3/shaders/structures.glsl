@@ -18,7 +18,7 @@ struct ObjectInputData {
     uint start_idx;
     uint count;
     int vertex_offset;
-    uint material_translation_idx;
+    uint material_idx;
     mat4 transform;
     // xyz position; w radius
     vec4 bounding_sphere;
@@ -29,7 +29,7 @@ struct ObjectOutputData {
     mat4 model_view;
     mat4 model_view_proj;
     mat3 inv_trans_model_view;
-    uint material_translation_idx;
+    uint material_idx;
     bool activ;
 };
 
@@ -47,7 +47,7 @@ struct IndirectCall {
 #define FLAGS_ALPHA_CUTOUT       0x08
 #define FLAGS_BICOMPONENT_NORMAL 0x10
 
-struct MaterialData {
+struct GPUMaterialData {
     vec4 albedo;
     float roughness;
     float metallic;
@@ -67,6 +67,21 @@ struct MaterialData {
     uint clear_coat_roughness_tex;
     uint anisotropy_tex;
     uint ambient_occlusion_tex;
+    uint material_flags;
+};
+
+struct CPUMaterialData {
+    vec4 albedo;
+    float roughness;
+    float metallic;
+    float reflectance;
+    float clear_coat;
+    float clear_coat_roughness;
+    float anisotropy;
+    float ambient_occlusion;
+    float alpha_cutout;
+
+    uint texture_enable;
     uint material_flags;
 };
 

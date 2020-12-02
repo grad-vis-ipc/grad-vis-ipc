@@ -1,19 +1,20 @@
-use crate::renderer::info::Vendor;
 use crate::{
     instruction::InstructionStreamPair,
     renderer::{
+        copy::GpuCopy,
+        culling,
         info::ExtendedAdapterInfo,
         light::DirectionalLightManager,
         limits::{check_features, check_limits},
+        list::RenderListCache,
         material::MaterialManager,
         mesh::MeshManager,
         object::ObjectManager,
-        passes,
-        passes::ForwardPassSet,
+        pipeline::PipelineManager,
         resources::RendererGlobalResources,
         shaders::ShaderManager,
-        texture::{TextureManager, STARTING_2D_TEXTURES, STARTING_CUBE_TEXTURES, STARTING_INTERNAL_TEXTURES},
-        Renderer, SWAPCHAIN_FORMAT,
+        texture::{TextureManager, STARTING_2D_TEXTURES, STARTING_CUBE_TEXTURES},
+        Renderer, RendererMode,
     },
     RendererInitializationError, RendererOptions,
 };
@@ -28,17 +29,21 @@ use wgpu::{
 };
 use wgpu_conveyor::{AutomatedBufferManager, UploadStyle};
 
-struct PotentialAdapter {
-    adapter: Adapter,
+pub struct PotentialAdapter {
+    inner: Adapter,
     info: ExtendedAdapterInfo,
     features: Features,
     limits: Limits,
+    mode: RendererMode,
 }
 
-pub fn create_adapter() -> Result<(Instance, Adapter), RendererInitializationError> {
-    let backend_bits = BackendBit::VULKAN | BackendBit::DX12;
-    let default_backend_order = [Backend::Vulkan, Backend::Dx12];
-    let intel_backend_order = [Backend::Dx12, Backend::Vulkan];
+pub fn create_adapter(
+    desired_backend: Option<Backend>,
+    desired_device: Option<String>,
+    desired_mode: Option<RendererMode>,
+) -> Result<(Instance, PotentialAdapter), RendererInitializationError> {
+    let backend_bits = BackendBit::VULKAN | BackendBit::DX12 | BackendBit::DX11 | BackendBit::METAL;
+    let default_backend_order = [Backend::Vulkan, Backend::Metal, Backend::Dx12, Backend::Dx11];
 
     let instance = Instance::new(backend_bits);
 
@@ -53,16 +58,38 @@ pub fn create_adapter() -> Result<(Instance, Adapter), RendererInitializationErr
 
             tracing::debug!("{:?} Adapter {}: {:#?}", backend, idx, info);
 
-            let features = check_features(adapter.features()).ok();
-            let limits = check_limits(adapter.limits()).ok();
+            let adapter_features = adapter.features();
+            let adapter_limits = adapter.limits();
 
-            if let (Some(features), Some(limits)) = (features, limits) {
-                tracing::debug!("Adapter usable");
+            tracing::trace!("Features: {:?}", adapter_features);
+            tracing::trace!("Limits: {:#?}", adapter_limits);
+
+            let mut features = check_features(RendererMode::GPUPowered, adapter_features).ok();
+            let mut limits = check_limits(RendererMode::GPUPowered, &adapter_limits).ok();
+            let mut mode = RendererMode::GPUPowered;
+
+            if (features.is_none() || limits.is_none() || desired_mode == Some(RendererMode::CPUPowered))
+                && desired_mode != Some(RendererMode::GPUPowered)
+            {
+                features = check_features(RendererMode::CPUPowered, adapter_features).ok();
+                limits = check_limits(RendererMode::CPUPowered, &adapter_limits).ok();
+                mode = RendererMode::CPUPowered;
+            }
+
+            let desired = if let Some(ref desired_device) = desired_device {
+                info.name.to_lowercase().contains(desired_device)
+            } else {
+                true
+            };
+
+            if let (Some(features), Some(limits), true) = (features, limits, desired) {
+                tracing::debug!("Adapter usable in {:?} mode", mode);
                 potential_adapters.push(PotentialAdapter {
-                    adapter,
+                    inner: adapter,
                     info,
                     features,
                     limits,
+                    mode,
                 })
             } else {
                 tracing::debug!("Adapter not usable");
@@ -81,19 +108,14 @@ pub fn create_adapter() -> Result<(Instance, Adapter), RendererInitializationErr
         });
     }
 
-    let intel_vendor = valid_adapters
-        .get(&Backend::Vulkan)
-        .and_then(|arr| arr.get(0))
-        .map(|a: &PotentialAdapter| a.info.vendor.clone());
-    let is_intel = Some(Vendor::Intel) == intel_vendor;
+    for backend in &default_backend_order {
+        if let Some(desired_backend) = desired_backend {
+            if desired_backend != *backend {
+                tracing::debug!("Skipping unwanted backend {:?}", backend);
+                continue;
+            }
+        }
 
-    let backend_order = if is_intel {
-        &intel_backend_order
-    } else {
-        &default_backend_order
-    };
-
-    for backend in backend_order {
         let adapter: Option<PotentialAdapter> = valid_adapters.remove(backend).and_then(|arr| arr.into_iter().next());
 
         if let Some(adapter) = adapter {
@@ -101,7 +123,7 @@ pub fn create_adapter() -> Result<(Instance, Adapter), RendererInitializationErr
             tracing::debug!("Chosen backend: {:?}", backend);
             tracing::debug!("Chosen features: {:#?}", adapter.features);
             tracing::debug!("Chosen limits: {:#?}", adapter.limits);
-            return Ok((instance, adapter.adapter));
+            return Ok((instance, adapter));
         }
     }
 
@@ -111,22 +133,24 @@ pub fn create_adapter() -> Result<(Instance, Adapter), RendererInitializationErr
 pub async fn create_renderer<W: HasRawWindowHandle, TLD: 'static>(
     window: &W,
     yard: Arc<Switchyard<TLD>>,
-    imgui: &mut imgui::Context,
+    _imgui: &mut imgui::Context,
+    desired_backend: Option<Backend>,
+    desired_device: Option<String>,
+    desired_mode: Option<RendererMode>,
     options: RendererOptions,
 ) -> Result<Arc<Renderer<TLD>>, RendererInitializationError> {
-    let (instance, adapter) = create_adapter()?;
+    let (instance, chosen_adapter) = create_adapter(desired_backend, desired_device, desired_mode)?;
 
     let surface = unsafe { instance.create_surface(window) };
 
-    let adapter_info = ExtendedAdapterInfo::from(adapter.get_info());
-    let features = check_features(adapter.features())?;
-    let limits = check_limits(adapter.limits())?;
+    let adapter_info = chosen_adapter.info;
 
-    let (device, queue) = adapter
+    let (device, queue) = chosen_adapter
+        .inner
         .request_device(
             &DeviceDescriptor {
-                features,
-                limits,
+                features: chosen_adapter.features,
+                limits: chosen_adapter.limits,
                 shader_validation: true,
             },
             None,
@@ -137,85 +161,58 @@ pub async fn create_renderer<W: HasRawWindowHandle, TLD: 'static>(
     let device = Arc::new(device);
 
     let shader_manager = ShaderManager::new(Arc::clone(&device));
-    let mut global_resources = RwLock::new(RendererGlobalResources::new(&device, &surface, &options));
+
+    let mut global_resources = RwLock::new(RendererGlobalResources::new(
+        &device,
+        &surface,
+        chosen_adapter.mode,
+        &options,
+    ));
     let global_resource_guard = global_resources.get_mut();
 
-    let culling_pass = passes::CullingPass::new(
+    let gpu_copy = GpuCopy::new(&device, &shader_manager, adapter_info.subgroup_size());
+
+    let culling_pass = culling::CullingPass::new(
         &device,
+        chosen_adapter.mode,
         &shader_manager,
         &global_resource_guard.prefix_sum_bgl,
         &global_resource_guard.pre_cull_bgl,
-        &global_resource_guard.general_bgl,
+        &global_resource_guard.object_input_bgl,
         &global_resource_guard.object_output_bgl,
-        &global_resource_guard.uniform_bgl,
+        &global_resource_guard.camera_data_bgl,
         adapter_info.subgroup_size(),
     );
 
-    let swapchain_blit_pass = passes::BlitPass::new(
+    let texture_manager_2d = RwLock::new(TextureManager::new(
         &device,
-        &shader_manager,
-        &global_resource_guard.blit_bgl,
-        SWAPCHAIN_FORMAT,
-    );
-
-    let mut texture_manager_2d = RwLock::new(TextureManager::new(
-        &device,
+        chosen_adapter.mode,
         STARTING_2D_TEXTURES,
         TextureViewDimension::D2,
     ));
-    let texture_manager_2d_guard = texture_manager_2d.get_mut();
-
-    let depth_pass = passes::DepthPass::new(
+    let texture_manager_cube = RwLock::new(TextureManager::new(
         &device,
-        &shader_manager,
-        &global_resource_guard.general_bgl,
-        &global_resource_guard.object_output_noindirect_bgl,
-        &texture_manager_2d_guard.bind_group_layout(),
-    );
-
-    let mut texture_manager_internal = RwLock::new(TextureManager::new(
-        &device,
-        STARTING_INTERNAL_TEXTURES,
-        TextureViewDimension::D2,
-    ));
-    let texture_manager_internal_guard = texture_manager_internal.get_mut();
-
-    let opaque_pass = passes::OpaquePass::new(
-        &device,
-        &shader_manager,
-        &global_resource_guard.general_bgl,
-        &global_resource_guard.object_output_noindirect_bgl,
-        &texture_manager_2d_guard.bind_group_layout(),
-        &texture_manager_internal_guard.bind_group_layout(),
-    );
-
-    let mut texture_manager_cube = RwLock::new(TextureManager::new(
-        &device,
+        chosen_adapter.mode,
         STARTING_CUBE_TEXTURES,
         TextureViewDimension::Cube,
     ));
-    let texture_manager_cube_guard = texture_manager_cube.get_mut();
 
-    let skybox_pass = passes::SkyboxPass::new(
-        &device,
-        &shader_manager,
-        &global_resource_guard.general_bgl,
-        &global_resource_guard.object_output_noindirect_bgl,
-        &texture_manager_cube_guard.bind_group_layout(),
-    );
-
-    let forward_pass_set = ForwardPassSet::new(
-        &device,
-        &global_resource_guard.uniform_bgl,
-        String::from("Forward Pass"),
-    );
+    let pipeline_manager = PipelineManager::new();
 
     let mut buffer_manager = Mutex::new(AutomatedBufferManager::new(UploadStyle::from_device_type(
         &adapter_info.device_type,
     )));
     let mesh_manager = RwLock::new(MeshManager::new(&device));
-    let material_manager = RwLock::new(MaterialManager::new(&device, buffer_manager.get_mut()));
-    let object_manager = RwLock::new(ObjectManager::new(&device, buffer_manager.get_mut()));
+    let material_manager = RwLock::new(MaterialManager::new(
+        &device,
+        chosen_adapter.mode,
+        buffer_manager.get_mut(),
+    ));
+    let object_manager = RwLock::new(ObjectManager::new(
+        &device,
+        chosen_adapter.mode,
+        buffer_manager.get_mut(),
+    ));
     let directional_light_manager = RwLock::new(DirectionalLightManager::new(&device, buffer_manager.get_mut()));
 
     span_transfer!(_ -> imgui_guard, INFO, "Creating Imgui Renderer");
@@ -224,39 +221,35 @@ pub async fn create_renderer<W: HasRawWindowHandle, TLD: 'static>(
 
     span_transfer!(imgui_guard -> _);
 
-    let (culling_pass, depth_pass, opaque_pass, swapchain_blit_pass, skybox_pass) =
-        futures::join!(culling_pass, depth_pass, opaque_pass, swapchain_blit_pass, skybox_pass);
-    let depth_pass = RwLock::new(depth_pass);
-    let skybox_pass = RwLock::new(skybox_pass);
-    let opaque_pass = RwLock::new(opaque_pass);
+    let render_list_cache = RwLock::new(RenderListCache::new());
+
+    let (culling_pass, gpu_copy) = futures::join!(culling_pass, gpu_copy);
 
     Ok(Arc::new(Renderer {
         yard,
         instructions: InstructionStreamPair::new(),
 
-        _adapter_info: adapter_info,
+        mode: chosen_adapter.mode,
+        adapter_info,
         queue,
         device,
         surface,
 
         buffer_manager,
         global_resources,
-        _shader_manager: shader_manager,
+        shader_manager,
+        pipeline_manager,
         mesh_manager,
         texture_manager_2d,
         texture_manager_cube,
-        texture_manager_internal,
         material_manager,
         object_manager,
         directional_light_manager,
 
-        forward_pass_set,
+        render_list_cache,
 
-        swapchain_blit_pass,
+        gpu_copy,
         culling_pass,
-        skybox_pass,
-        depth_pass,
-        opaque_pass,
 
         // _imgui_renderer: imgui_renderer,
         options: RwLock::new(options),

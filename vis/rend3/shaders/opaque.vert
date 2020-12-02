@@ -7,7 +7,9 @@ layout(location = 1) in vec3 i_normal;
 layout(location = 2) in vec2 i_coords;
 layout(location = 3) in vec4 i_color;
 layout(location = 4) in uint i_material;
+#ifdef GPU_MODE
 layout(location = 5) in uint i_object_idx;
+#endif
 
 layout(location = 0) out vec4 o_view_position;
 layout(location = 1) out vec3 o_normal;
@@ -15,15 +17,17 @@ layout(location = 2) out vec2 o_coords;
 layout(location = 3) out vec4 o_color;
 layout(location = 4) flat out uint o_material;
 
-layout(set = 0, binding = 1, std430) restrict readonly buffer MaterialTranslationbuffer {
-    uint material_translation[];
-};
 layout(set = 1, binding = 0, std430) restrict readonly buffer ObjectOutputDataBuffer {
     ObjectOutputData object_output[];
 };
-layout(set = 1, binding = 1) uniform UniformBuffer {
+layout(set = 3, binding = 0) uniform UniformBuffer {
     UniformData uniforms;
 };
+#ifdef CPU_MODE
+layout(push_constant) uniform PushConstant {
+    uint i_object_idx;
+};
+#endif
 
 void main() {
     uint object_idx = i_object_idx;
@@ -32,8 +36,7 @@ void main() {
 
     gl_Position = data.model_view_proj * vec4(i_position, 1.0);
 
-    uint material = material_translation[data.material_translation_idx + i_material];
-    o_material = material;
+    o_material = data.material_idx;
 
     o_view_position = data.model_view * vec4(i_position, 1.0);
 
