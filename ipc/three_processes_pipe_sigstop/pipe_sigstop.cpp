@@ -50,8 +50,8 @@ int main(int argc, char* argv[]){
         cout << "Attachment errr" << endl;
         exit(1);
     }
+  
     *ready = 1;
-
     pids = (int *) shmat (shmid2, NULL, 0);   
     if(*pids == -1){
         cout << "Attachment errr" << endl;
@@ -77,7 +77,7 @@ int main(int argc, char* argv[]){
             break;   
         else{
             if(i ==0){
-            pids[0] = (int)pid;
+                pids[0] = (int)pid;
                
             }
             else if(i==1){
@@ -90,20 +90,22 @@ int main(int argc, char* argv[]){
     if (pid > 0){ /* Parent Process */ 
         int endID = waitpid(pids[0], &status, WNOHANG|WUNTRACED);
         while (endID!=pids[0]){ /*while write-program has not yet terminated */
-
+        //while(*ready !=2){
             /* when read-program sets ready to 0 meaning pause on sending data */
             if(*ready == 0){ 
+               // cout << "pausing" <<endl;
                 kill((pid_t)pids[0], SIGSTOP);
             }
             /* when read-program sets ready to 0 meaning pause on sending data */
             else if(*ready ==1){ 
+                cout << "resuming" <<endl;
                 kill((pid_t)pids[0], SIGCONT);
             }
-            endID = waitpid(pids[0], &status, WNOHANG|WUNTRACED);
+           // endID = waitpid(pids[0], &status, WNOHANG|WUNTRACED);
         }
         
         *ready = 2; /* ready = 2 stating the write-program finished sending all data */
-        endID = waitpid(pids[1], &status, WNOHANG|WUNTRACED);
+       endID = waitpid(pids[1], &status, WNOHANG|WUNTRACED);
         /* closing the pipe */
         if(endID != pids[1]){ 
             close(GRAD_READ);
@@ -148,6 +150,8 @@ int main(int argc, char* argv[]){
             close(D3_WRITE);
             dup2(GRAD_WRITE , STDOUT_FILENO); /* make output go to pipe */
             execlp(argv[1], argv[1], NULL);
+            // char* arr[] = {"./svm.out", "data_monks/monks-1.train", "data_monks/monks-1.test", "400000",".001", NULL};
+            // execv(argv[1], arr);
         }
         else{ // runing receive process
             dup2(GRAD_READ,STDIN_FILENO); /* get input from pipe */
