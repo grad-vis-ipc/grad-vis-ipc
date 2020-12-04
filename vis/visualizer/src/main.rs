@@ -132,8 +132,20 @@ fn extract_mode(value: &str) -> Result<rend3::RendererMode, &'static str> {
     })
 }
 
+#[cfg(target_os = "unix")]
+unsafe fn get_shared_memory_pointer() -> &'static i32 {
+    let name = std::ffi::CString::new("shmfile");
+    let key: libc::key_t = libc::ftok(name.as_ptr(), 65);
+    let shmid = libc::shmget(key, std::mem::size_of::<i32>(), 0o666 | libc::IPC_CREAT);
+    let ptr = libc::shmat(shmid, std::ptr::null(), 0) as *mut i32;
+    &*ptr
+}
+
 fn main() {
     wgpu_subscriber::initialize_default_subscriber(None);
+
+    #[cfg(target_os = "unix")]
+    let ready = get_shared_memory_pointer();
 
     let mut args = Arguments::from_env();
     let desired_backend = args.value_from_fn(["-b", "--backend"], extract_backend).ok();
@@ -248,7 +260,15 @@ fn main() {
             timestamp_last_frame = now;
 
             let mut input = String::new();
+
+            #[cfg(target_os = "unix")]
+            *ready = 1;
+
             std::io::stdin().read_line(&mut input).unwrap();
+
+            #[cfg(target_os = "unix")]
+            *ready = 0;
+
             let input_trimmed = input.trim();
 
             // let trim_fluff = &input_trimmed[18..input_trimmed.len() - 1];
