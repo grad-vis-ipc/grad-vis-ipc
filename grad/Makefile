@@ -4,6 +4,11 @@ L_RATE?=.001
 MX_ITER?=1000000
 D_SET?=1
 
+SRC?=dispatcher.cpp
+file: 
+	g++ $(SRC) $(FLAGS) -o $(SRC).out
+	./$(SRC).out
+
 log_reg.out: logistic_regression.o reg_driver.cpp
 	g++ logistic_regression.o reg_driver.cpp $(FLAGS) -o log_reg.out
 
