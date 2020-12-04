@@ -262,12 +262,16 @@ fn main() {
             let mut input = String::new();
 
             #[cfg(target_os = "unix")]
-            *ready = 1;
+            {
+                *ready = 1;
+            }
 
             std::io::stdin().read_line(&mut input).unwrap();
 
             #[cfg(target_os = "unix")]
-            *ready = 0;
+            {
+                *ready = 0;
+            }
 
             let input_trimmed = input.trim();
 
