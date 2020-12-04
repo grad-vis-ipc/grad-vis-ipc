@@ -145,7 +145,7 @@ fn main() {
     wgpu_subscriber::initialize_default_subscriber(None);
 
     #[cfg(target_os = "unix")]
-    let ready = get_shared_memory_pointer();
+    let ready = unsafe { get_shared_memory_pointer() };
 
     let mut args = Arguments::from_env();
     let desired_backend = args.value_from_fn(["-b", "--backend"], extract_backend).ok();
