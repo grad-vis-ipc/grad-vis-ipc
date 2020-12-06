@@ -87,7 +87,9 @@ int main(int argc, char* argv[]){
             if(*ready ==1){
                 
                cout << count <<endl;
-               count++;
+                count++;
+               *ready = 0;
+              
             }
         }
         /* closing the pipe */

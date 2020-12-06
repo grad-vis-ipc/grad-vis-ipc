@@ -10,13 +10,15 @@ int main() {
    int *ready = (int*) shmat(shmid,(void*)0,0); // shmat to join to shared memory
 
    string x;
-
+   int count = 0;
+  	*ready = 1;
 	while(cin >> x){
 		
-      cout << "R: data is " << x <<endl; 
-      *ready = 0;
-      sleep(4);
-      
+      cout << "Reading: data is " << x <<endl; 
+      count++;
+
+      sleep(1);
+     
       *ready = 1;
 	}
 

@@ -9,6 +9,12 @@
 #include <string>
 #include <vector>
 #include <signal.h>
+#include <time.h> /* time_t, struct tm, difftime, time, mktime */
+#include <chrono>
+#include <fstream>
+#include <thread>
+#include "icecream.hpp"
+#include "xtensor/xadapt.hpp"
 using namespace std;
 
 #define GRAD_READ pipeML3D[0]
@@ -16,13 +22,24 @@ using namespace std;
 #define D3_READ pipe3DML[0]
 #define D3_WRITE pipe3DML[1]
 
+
+using d_vec = xt::xarray<double>;
+
+struct Dispatcher {
+  d_vec a0;
+  Dispatcher(double a = 1, double b = 1, double c = 1) { a0 = {a, b, c}; }
+  auto to_vec() { return std::vector<double>(a0.begin(), a0.end()); }
+  void step(double z) { a0 = xt::cos(xt::ones_like(a0) * z); }
+};
+
+
 struct pcb{
     pid_t pid;
     pcb* next;
 };
 
 int main(int argc, char* argv[]){
-    if(argc != 3){
+    if(argc != 2){
         cout << argc <<endl;
         cout << "invalid number of argument " <<endl;
         return -1;
@@ -32,13 +49,14 @@ int main(int argc, char* argv[]){
     int *ready;
     int shmid1, shmid2;  
     int i;
+    pid_t receive_pid;
     int status;  
     pcb * head;   
     pid_t pid;
     
     key_t key = ftok("shmfile",65); 
     shmid1 = shmget (key, sizeof (int), IPC_CREAT | 0666);
-    shmid2 = shmget (IPC_PRIVATE, 2*sizeof(int), IPC_CREAT | 0666);
+ 
     if (shmid1 < 0) {                           /* shmget error check */
         cout << "shmget error" << endl;
         exit (1);
@@ -50,14 +68,9 @@ int main(int argc, char* argv[]){
         cout << "Attachment errr" << endl;
         exit(1);
     }
-  
-    *ready = 1;
-    pids = (int *) shmat (shmid2, NULL, 0);   
-    if(*pids == -1){
-        cout << "Attachment errr" << endl;
-        exit(1);
-    }
+    *ready = 0;
 
+    
     if(pipe(pipeML3D) == -1 ){  
         perror("Pipe creation failure.");
         exit(EXIT_FAILURE);
@@ -67,54 +80,50 @@ int main(int argc, char* argv[]){
         exit(EXIT_FAILURE);
     }
 
-    for (i = 0; i < 2; i++){
+   
         pid = fork();
         if (pid < 0) {       /* Error check */    
             cout << "fork error" << endl;
             exit(1);
         }
-        else if (pid == 0)  /* Child process */
-            break;   
         else{
-            if(i ==0){
-                pids[0] = (int)pid;
-               
-            }
-            else if(i==1){
-                pids[1] = (int)pid;
-    
-            }
+           receive_pid = pid;
         }
                 
-    }
+    
     if (pid > 0){ /* Parent Process */ 
-        int endID = waitpid(pids[0], &status, WNOHANG|WUNTRACED);
-        while (endID!=pids[0]){ /*while write-program has not yet terminated */
-        //while(*ready !=2){
-            /* when read-program sets ready to 0 meaning pause on sending data */
-            if(*ready == 0){ 
-               // cout << "pausing" <<endl;
-                kill((pid_t)pids[0], SIGSTOP);
-            }
-            /* when read-program sets ready to 0 meaning pause on sending data */
-            else if(*ready ==1){ 
-                cout << "resuming" <<endl;
-                kill((pid_t)pids[0], SIGCONT);
-            }
-           // endID = waitpid(pids[0], &status, WNOHANG|WUNTRACED);
+        close(D3_READ);
+        close(D3_WRITE);
+        dup2(GRAD_WRITE , STDOUT_FILENO); /* make output go to pipe */
+
+        auto d1 = Dispatcher();
+
+         auto time1 = std::chrono::high_resolution_clock::now();
+
+        while (true) {
+            if(*ready ==1){
+                std::cout << d1.a0[0] << ',' << d1.a0[1] << ',' << d1.a0[2] << ','
+                          << std::endl;
+                auto time2 = std::chrono::high_resolution_clock::now();
+                double s =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(time2 - time1)
+                        .count() /
+                    1000.0;
+                std::this_thread::sleep_for(std::chrono::milliseconds(15));
+
+                d1.step(s);
+                *ready = 0;
+          }
         }
-        
-        *ready = 2; /* ready = 2 stating the write-program finished sending all data */
-       endID = waitpid(pids[1], &status, WNOHANG|WUNTRACED);
+     
         /* closing the pipe */
-        if(endID != pids[1]){ 
-            close(GRAD_READ);
+        if(waitpid(receive_pid, &status, WNOHANG|WUNTRACED)!= receive_pid){
             close(GRAD_WRITE);
             close(D3_READ);
             close(D3_WRITE);
         }
         /* wait until read finishes reading the rest of the data */
-        while(status = (int)waitpid(pids[1], &status, WNOHANG|WUNTRACED)!= pids[1] ){
+        while(status = waitpid(receive_pid, &status, WNOHANG|WUNTRACED)!= pids[1] ){
             if(status==-1)
                 break;
         }
@@ -130,36 +139,20 @@ int main(int argc, char* argv[]){
             cout << "Error: Remove shared memory segment  " << endl;
             exit(1);
         }
-        status = shmdt (pids);
-        if(status == -1){
-            cout << "Error: Remove shared memory segment  " << endl;
-            exit(1);
-        }
-        status = shmctl (shmid2, IPC_RMID, 0); 
-        if(status == -1){
-            cout << "Error: Remove shared memory segment  " << endl;
-            exit(1);
-        }
+      
+        
         cout << "done"<<endl;
         exit(0);
       
     }
     else{   /* Child process */  
-        if(getpid() == (pid_t)pids[0]){ //running send process 
-            close(D3_READ);
-            close(D3_WRITE);
-            dup2(GRAD_WRITE , STDOUT_FILENO); /* make output go to pipe */
-            execlp(argv[1], argv[1], NULL);
-            // char* arr[] = {"./svm.out", "data_monks/monks-1.train", "data_monks/monks-1.test", "400000",".001", NULL};
-            // execv(argv[1], arr);
-        }
-        else{ // runing receive process
+      
             dup2(GRAD_READ,STDIN_FILENO); /* get input from pipe */
             close(GRAD_WRITE);
             close(D3_READ);
             close(D3_WRITE);
-            execlp(argv[2],argv[2], NULL);
-        }
+            execlp(argv[1],argv[1], NULL);
+        
         
    }
         
