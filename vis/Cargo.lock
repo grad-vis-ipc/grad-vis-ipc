@@ -2163,6 +2163,7 @@ dependencies = [
  "image",
  "imgui",
  "imgui-winit-support",
+ "libc",
  "obj",
  "pico-args",
  "rend3",
