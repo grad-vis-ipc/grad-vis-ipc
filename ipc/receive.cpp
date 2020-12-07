@@ -21,8 +21,8 @@ int main() {
      
       *ready = 1;
 	}
+   return 0;
 
 
-   cout <<"finished"<<endl;
-	
+
 }
