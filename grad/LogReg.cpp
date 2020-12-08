@@ -80,31 +80,6 @@ int main(const int argc, const char* argv[]) {
   const auto [train_fname, test_fname, N_ITER, LEARNING_RATE] =
       std::make_tuple(argv[1], argv[2], atoi(argv[3]), std::stod(argv[4]));
 
-  // // load csv from files
-  // std::ifstream train(train_fname);  // training set
-  // auto training_set_raw = xt::load_csv<double>(train);
-  // train.close();
-
-  // std::ifstream test(test_fname);  // test set
-  // auto test_set_raw = xt::load_csv<double>(test);
-  // test.close();
-
-  // auto train_labels = xt::col(training_set_raw, 0);
-  // auto training_set =
-  //     xt::view(training_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
-
-  // auto test_labels = xt::col(test_set_raw, 0);
-  // auto test_set =
-  //     xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
-
-  // auto clf = LogReg(training_set, train_labels, N_ITER, LEARNING_RATE);
-  // auto weights = clf.train();
-
-  // d_vec actual = xt::eval(test_labels);
-  // auto predictions = clf.predict(test_set);
-  // auto accuracy = xt::mean(xt::isclose(actual, predictions));
-  // IC(accuracy);
-
   // create two classes A and B which are normally distributed
   auto A = xt::random::randn<double>({100, 3}, 1, .3);
   auto B = xt::random::randn<double>({100, 3}, -1, .3);
@@ -127,15 +102,19 @@ int main(const int argc, const char* argv[]) {
 
   auto A_test = xt::random::randn<double>({20, 3}, 1, .5);
   auto B_test = xt::random::randn<double>({20, 3}, -1, .5);
-  auto test_set = xt::vstack(xt::xtuple(A, B));
+  auto test_set = xt::vstack(xt::xtuple(A_test, B_test));
 
   auto clf = LogReg(e_features, e_labels, N_ITER, LEARNING_RATE);
-  // auto weights  = clf.train();
   for (int i = 0; i < 10; ++i) {
+
     auto predictions = clf.predict(test_set);
-    IC(predictions);
+    // IC(predictions);
+
+    // take a single step in the classifier
     clf.train_step();
-    for (int j = 0; j < 200; ++j) {
+
+    // print out all new predictions in form x y z LABEL
+    for (int j = 0; j < 40; ++j) {
       auto row = xt::view(test_set, j, xt::all());
       auto pred = xt::view(predictions, xt::all(), j);
       auto t_vec = std::vector<double>(row.begin(), row.end());
