@@ -3,6 +3,7 @@ use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use imgui::FontSource;
 use obj::{IndexTuple, Obj, ObjMaterial};
 use pico_args::Arguments;
+use rend3::datatypes::MaterialChange;
 use rend3::{
     datatypes::{
         AffineTransform, AlbedoComponent, CameraLocation, DirectionalLight, Material, MaterialComponent,
@@ -46,7 +47,7 @@ fn load_skybox(renderer: &Renderer) {
     renderer.set_background_texture(handle);
 }
 
-fn load_obj(renderer: &Renderer, file: &str) -> ObjectHandle {
+fn load_obj(renderer: &Renderer, file: &str) -> (ObjectHandle, MaterialHandle) {
     rend3::span!(obj_guard, INFO, "Loading Obj");
 
     let mut object = Obj::load(file).unwrap();
@@ -100,13 +101,15 @@ fn load_obj(renderer: &Renderer, file: &str) -> ObjectHandle {
         ..Material::default()
     });
 
-    renderer.add_object(Object {
+    let object = renderer.add_object(Object {
         mesh,
         material,
         transform: AffineTransform {
             transform: Mat4::identity(),
         },
-    })
+    });
+
+    (object, material)
 }
 
 fn button_pressed<Hash: BuildHasher>(map: &HashMap<u32, bool, Hash>, key: u32) -> bool {
@@ -221,7 +224,7 @@ fn main() {
 
     rend3::span_transfer!(renderer_span -> loading_span, INFO, "Loading resources");
 
-    let sphere = load_obj(&renderer, "tmp/sphere.obj");
+    let (sphere, material) = load_obj(&renderer, "tmp/sphere.obj");
     load_skybox(&renderer);
 
     renderer.add_directional_light(DirectionalLight {
@@ -281,13 +284,25 @@ fn main() {
             let first: f32 = split.next().unwrap().parse().unwrap();
             let second: f32 = split.next().unwrap().parse().unwrap();
             let third: f32 = split.next().unwrap().parse().unwrap();
+            let fourth: u32 = split.next().unwrap().parse().unwrap();
 
-            println!("({}, {}, {})", first, second, third);
+            println!("({}, {}, {}, {})", first, second, third, fourth);
 
             renderer.set_object_transform(
                 sphere,
                 AffineTransform {
                     transform: Mat4::from_translation(Vec3::new(first, second, third)),
+                },
+            );
+
+            renderer.update_material(
+                material,
+                MaterialChange {
+                    albedo: Some(AlbedoComponent::Value(match fourth {
+                        0 => Vec4::new(1.0, 0.0, 0.0, 1.0),
+                        _ => Vec4::new(0.0, 1.0, 0.0, 1.0),
+                    })),
+                    ..MaterialChange::default()
                 },
             );
 

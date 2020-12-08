@@ -320,7 +320,7 @@ impl<T: Copy> MaterialComponent<T> {
 //
 // - Green screen value
 changeable_struct! {
-    #[derive(Debug, Default,Copy,  Clone)]
+    #[derive(Debug, Default, Copy,  Clone)]
     pub struct Material <- nodefault MaterialChange {
         pub albedo: AlbedoComponent,
         pub normal: Option<TextureHandle>,
