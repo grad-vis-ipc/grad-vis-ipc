@@ -94,7 +94,7 @@ int main(const int argc, const char* argv[]) {
     }
     int* pids;
     int pipeML3D[2];
-    int *ready;
+    int volatile *ready;
     int shmid1, shmid2;  
     int i;
     pid_t receive_pid;
@@ -108,12 +108,12 @@ int main(const int argc, const char* argv[]) {
         exit (1);
     } 
     /* Attach shared variable to shared memory using shmat  */
-    ready = (int *) shmat (shmid1, NULL, 0);   
+    ready = (int volatile *) shmat (shmid1, NULL, 0);   
     if(*ready == -1){
         cout << "Attachment errr" << endl;
         exit(1);
     }
-    *ready = 0;
+    *ready = 1;
     if(pipe(pipeML3D) == -1 ){  
         perror("Pipe creation failure.");
         exit(EXIT_FAILURE);
@@ -129,7 +129,7 @@ int main(const int argc, const char* argv[]) {
   //   return EXIT_FAILURE;
   // }
   const auto [ N_ITER, LEARNING_RATE] =
-      std::make_tuple(1000, 1e-19);
+      std::make_tuple(1000, 1e-21);
 
   // create two classes A and B which are normally distributed
   auto A = xt::random::randn<double>({100, 3}, 1, .3);
@@ -170,7 +170,6 @@ int main(const int argc, const char* argv[]) {
     if (pid > 0){ /* Parent Process */ 
   
        dup2(GRAD_WRITE , STDOUT_FILENO); /* make output go to pipe */
-      close(GRAD_READ);
       //  string data;
       
         while(true){
@@ -190,7 +189,6 @@ int main(const int argc, const char* argv[]) {
               auto t_vec = std::vector<double>(row.begin(), row.end());
               auto p_vec = std::vector<double>(pred.begin(), pred.end());
               std::cout << t_vec[0] << " " << t_vec[1] << " " << t_vec[2] << " " << p_vec[0] << std::endl;
-              *ready = 0;
             }
         }
         
@@ -210,7 +208,7 @@ int main(const int argc, const char* argv[]) {
         }
         
         /* deatach shared memory */
-        status = shmdt (ready);
+        status = shmdt (const_cast<int*>(ready));
         if(status == -1){
             cout << "Error: Remove shared memory segment  " << endl;
             exit(1);

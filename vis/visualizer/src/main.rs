@@ -47,7 +47,7 @@ fn load_skybox(renderer: &Renderer) {
     renderer.set_background_texture(handle);
 }
 
-fn load_obj(renderer: &Renderer, file: &str) -> (ObjectHandle, MaterialHandle) {
+fn load_obj(renderer: &Renderer, file: &str) -> Vec<(ObjectHandle, MaterialHandle)> {
     rend3::span!(obj_guard, INFO, "Loading Obj");
 
     let mut object = Obj::load(file).unwrap();
@@ -96,20 +96,24 @@ fn load_obj(renderer: &Renderer, file: &str) -> (ObjectHandle, MaterialHandle) {
 
     let mesh = renderer.add_mesh(mesh);
 
-    let material = renderer.add_material(Material {
-        albedo: AlbedoComponent::Value(Vec4::new(0.5, 0.5, 0.0, 1.0)),
-        ..Material::default()
-    });
+    let mut vec = Vec::new();
+    for _ in 0..40 {
+        let material = renderer.add_material(Material {
+            albedo: AlbedoComponent::Value(Vec4::new(0.5, 0.5, 0.0, 1.0)),
+            ..Material::default()
+        });
 
-    let object = renderer.add_object(Object {
-        mesh,
-        material,
-        transform: AffineTransform {
-            transform: Mat4::identity(),
-        },
-    });
+        let object = renderer.add_object(Object {
+            mesh,
+            material,
+            transform: AffineTransform {
+                transform: Mat4::identity(),
+            },
+        });
+        vec.push((object, material));
+    }
 
-    (object, material)
+    vec
 }
 
 fn button_pressed<Hash: BuildHasher>(map: &HashMap<u32, bool, Hash>, key: u32) -> bool {
@@ -141,7 +145,7 @@ unsafe fn get_shared_memory_pointer() -> &'static i32 {
     let key: libc::key_t = libc::ftok(name.as_ptr(), 65);
     let shmid = libc::shmget(key, std::mem::size_of::<i32>(), 0o666 | libc::IPC_CREAT);
     let ptr = libc::shmat(shmid, std::ptr::null(), 0) as *mut i32;
-    &*ptr
+    &*dbg!(ptr)
 }
 
 fn main() {
@@ -224,7 +228,7 @@ fn main() {
 
     rend3::span_transfer!(renderer_span -> loading_span, INFO, "Loading resources");
 
-    let (sphere, material) = load_obj(&renderer, "tmp/sphere.obj");
+    let mut objects = load_obj(&renderer, "tmp/sphere.obj");
     load_skybox(&renderer);
 
     renderer.add_directional_light(DirectionalLight {
@@ -238,7 +242,11 @@ fn main() {
 
     let mut scancode_status = HashMap::with_hasher(FnvBuildHasher::default());
 
-    let mut camera_location = CameraLocation::default();
+    let mut camera_location = CameraLocation {
+        location: glam::Vec3A::new(0.0, 0.0, -5.0),
+        pitch: 0.0,
+        yaw: 0.0,
+    };
 
     let mut timestamp_last_second = Instant::now();
     let mut timestamp_last_frame = Instant::now();
@@ -262,49 +270,53 @@ fn main() {
             let delta_time = now - timestamp_last_frame;
             timestamp_last_frame = now;
 
-            let mut input = String::new();
+            #[cfg(target_os = "unix")]
+            {
+                unsafe { std::ptr::write_volatile(ready as *mut _, 1) };
+            }
+
+            for (obj, mat) in &objects {
+                let mut input = String::new();
+
+                std::io::stdin().read_line(&mut input).unwrap();
+
+                let input_trimmed = input.trim();
+
+                // dbg!(&input_trimmed);
+
+                // let trim_fluff = &input_trimmed[18..input_trimmed.len() - 1];
+                let mut split = input_trimmed.split(" ").map(str::trim);
+
+                let first: f32 = split.next().unwrap().parse().unwrap();
+                let second: f32 = split.next().unwrap().parse().unwrap();
+                let third: f32 = split.next().unwrap().parse().unwrap();
+                let fourth: u32 = split.next().unwrap().parse().unwrap();
+
+                // println!("({}, {}, {}, {})", first, second, third, fourth);
+
+                renderer.set_object_transform(
+                    *obj,
+                    AffineTransform {
+                        transform: Mat4::from_translation(Vec3::new(first, second, third)) * Mat4::from_scale(Vec3::splat(0.1)),
+                    },
+                );
+
+                renderer.update_material(
+                    *mat,
+                    MaterialChange {
+                        albedo: Some(AlbedoComponent::Value(match fourth {
+                            0 => Vec4::new(1.0, 0.0, 0.0, 1.0),
+                            _ => Vec4::new(0.0, 1.0, 0.0, 1.0),
+                        })),
+                        ..MaterialChange::default()
+                    },
+                );
+            }
 
             #[cfg(target_os = "unix")]
             {
-                *ready = 1;
+                unsafe { std::ptr::write_volatile(ready as *mut _, 0) };
             }
-
-            std::io::stdin().read_line(&mut input).unwrap();
-
-            #[cfg(target_os = "unix")]
-            {
-                *ready = 0;
-            }
-
-            let input_trimmed = input.trim();
-
-            // let trim_fluff = &input_trimmed[18..input_trimmed.len() - 1];
-            let mut split = input_trimmed.split(",").map(str::trim);
-
-            let first: f32 = split.next().unwrap().parse().unwrap();
-            let second: f32 = split.next().unwrap().parse().unwrap();
-            let third: f32 = split.next().unwrap().parse().unwrap();
-            let fourth: u32 = split.next().unwrap().parse().unwrap();
-
-            println!("({}, {}, {}, {})", first, second, third, fourth);
-
-            renderer.set_object_transform(
-                sphere,
-                AffineTransform {
-                    transform: Mat4::from_translation(Vec3::new(first, second, third)),
-                },
-            );
-
-            renderer.update_material(
-                material,
-                MaterialChange {
-                    albedo: Some(AlbedoComponent::Value(match fourth {
-                        0 => Vec4::new(1.0, 0.0, 0.0, 1.0),
-                        _ => Vec4::new(0.0, 1.0, 0.0, 1.0),
-                    })),
-                    ..MaterialChange::default()
-                },
-            );
 
             let velocity = if button_pressed(&scancode_status, platform::Scancodes::SHIFT) {
                 10.0
@@ -390,8 +402,8 @@ fn main() {
             let handle = renderer.render(rend3::list::default_render_list(
                 renderer.mode(),
                 PhysicalSize {
-                    width: (options.size.width as f32 * 1.0) as u32,
-                    height: (options.size.height as f32 * 1.0) as u32,
+                    width: (options.size.width as f32 * 0.25) as u32,
+                    height: (options.size.height as f32 * 0.25) as u32,
                 },
                 &pipelines,
             ));
