@@ -15,25 +15,13 @@
 #include <thread>
 #include "icecream.hpp"
 #include "xtensor/xadapt.hpp"
+#include "../grad/log_reg_dispatcher.cpp"
 using namespace std;
 
 #define GRAD_READ pipeML3D[0]
 #define GRAD_WRITE pipeML3D[1]
 
-/*********************************************************************/
-/***************** Machine Learning Code *****************************/
-/*********************************************************************/
-using d_vec = xt::xarray<double>;
-struct Dispatcher {
-  d_vec a0;
-  Dispatcher(double a = 1, double b = 1, double c = 1) { a0 = {a, b, c}; }
-  auto to_vec() { return std::vector<double>(a0.begin(), a0.end()); }
-  void step(double z) { a0 = xt::cos(xt::ones_like(a0) * z); }
-};
 
-/*********************************************************************/
-/***********End of Machine Learning Code *****************************/
-/*********************************************************************/
 
 struct pcb{
     pid_t pid;
@@ -41,10 +29,9 @@ struct pcb{
 };
 
 int main(int argc, char* argv[]){
-    if(argc != 2){
-        cout << argc <<endl;
-        cout << "invalid number of argument " <<endl;
-        return -1;
+    if(argc != 6){
+        cout << "Usage: " << argv[0] << " <train> <test> <iterations> <step> <readfile>" << endl;
+        return EXIT_FAILURE;       
     }
     int* pids;
     int pipeML3D[2];
@@ -92,22 +79,12 @@ int main(int argc, char* argv[]){
     	/*********************************************************************/
 		/***************** Machine Learning Code *****************************/
 		/*********************************************************************/
-        auto d1 = Dispatcher();
-        auto time1 = std::chrono::high_resolution_clock::now();
+
       
         while (true) { 
             if(*ready ==1){ 
             
-                std::cout << d1.a0[0] << ',' << d1.a0[1] << ',' << d1.a0[2] << ','
-                          << std::endl;
-                auto time2 = std::chrono::high_resolution_clock::now();
-                double s =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(time2 - time1)
-                        .count() /
-                    1000.0;
-                std::this_thread::sleep_for(std::chrono::milliseconds(15));
-
-                d1.step(s);
+               
 				
                 *ready = 0;
           }
@@ -146,7 +123,7 @@ int main(int argc, char* argv[]){
     else{   /* Child process */  
   		close(GRAD_WRITE);
         dup2(GRAD_READ,STDIN_FILENO); /* get input from pipe */
-        execlp(argv[1],argv[1], NULL);   
+        execlp(argv[5],argv[5], NULL);   
    }
         
 }
