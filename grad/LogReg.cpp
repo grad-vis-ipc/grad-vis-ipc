@@ -105,18 +105,16 @@ int main(const int argc, const char* argv[]) {
   // auto accuracy = xt::mean(xt::isclose(actual, predictions));
   // IC(accuracy);
 
-  // create two classes A and B which are normally distributed with means of 4 and -4
-  auto A = xt::random::randn<double>({100, 3}, 4, .1);
-  auto B = xt::random::randn<double>({100, 3}, -4, .1);
+  // create two classes A and B which are normally distributed
+  auto A = xt::random::randn<double>({100, 3}, 1, .3);
+  auto B = xt::random::randn<double>({100, 3}, -1, .3);
 
-  // concatenate 
-  auto features = xt::vstack(xt::xtuple(A,B));
+  // concatenate
+  auto features = xt::vstack(xt::xtuple(A, B));
 
   // std::cout << features << std::endl;
   auto labels = xt::squeeze(
-    xt::hstack(
-      xt::xtuple(xt::ones<d>({1,100}), xt::zeros<d>({1,100}))
-      ));
+      xt::hstack(xt::xtuple(xt::ones<d>({1, 100}), xt::zeros<d>({1, 100}))));
   // std::cout << labels << std::endl;
   // IC(labels);
   auto e_features = xt::eval(features);
@@ -127,9 +125,24 @@ int main(const int argc, const char* argv[]) {
   xt::random::seed(0);
   xt::random::shuffle(e_labels);
 
+  auto A_test = xt::random::randn<double>({20, 3}, 1, .5);
+  auto B_test = xt::random::randn<double>({20, 3}, -1, .5);
+  auto test_set = xt::vstack(xt::xtuple(A, B));
+
   auto clf = LogReg(e_features, e_labels, N_ITER, LEARNING_RATE);
-  auto weights  = clf.train();
-  IC(weights);
+  // auto weights  = clf.train();
+  for (int i = 0; i < 10; ++i) {
+    auto predictions = clf.predict(test_set);
+    IC(predictions);
+    clf.train_step();
+    for (int j = 0; j < 200; ++j) {
+      auto row = xt::view(test_set, j, xt::all());
+      auto pred = xt::view(predictions, xt::all(), j);
+      auto t_vec = std::vector<double>(row.begin(), row.end());
+      auto p_vec = std::vector<double>(pred.begin(), pred.end());
+      std::cout << t_vec[0] << " " << t_vec[1] << " " << t_vec[2] << " " << p_vec[0] << std::endl;
+    }
+  }
 
   return EXIT_SUCCESS;
 }
