@@ -40,10 +40,12 @@ struct LogReg {
         auto ll = xt::sum(target * (scores)-xt::log(1 + xt::exp(scores)));
         IC(ll);
         if (xt::allclose(ll, ll_old)) {
-          IC("Converged in ≈" + std::to_string(i) + " iterations");
+          auto n_iterations_converged = i;
+          IC(n_iterations_converged);
           break;
         } else if (xt::any(xt::greater(ll, ll_old))) {
-          IC("Diverged by ≈" + std::to_string(i) + " iterations");
+          auto n_iterations_diverged = i;
+          IC(n_iterations_diverged);
           break;
         }
         ll_old = ll;
@@ -78,34 +80,56 @@ int main(const int argc, const char* argv[]) {
   const auto [train_fname, test_fname, N_ITER, LEARNING_RATE] =
       std::make_tuple(argv[1], argv[2], atoi(argv[3]), std::stod(argv[4]));
 
-  // load csv from files
-  std::ifstream train(train_fname);  // training set
-  auto training_set_raw = xt::load_csv<double>(train);
-  train.close();
+  // // load csv from files
+  // std::ifstream train(train_fname);  // training set
+  // auto training_set_raw = xt::load_csv<double>(train);
+  // train.close();
 
-  std::ifstream test(test_fname);  // test set
-  auto test_set_raw = xt::load_csv<double>(test);
-  test.close();
+  // std::ifstream test(test_fname);  // test set
+  // auto test_set_raw = xt::load_csv<double>(test);
+  // test.close();
 
-  auto train_labels = xt::col(training_set_raw, 0);
-  auto training_set =
-      xt::view(training_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
+  // auto train_labels = xt::col(training_set_raw, 0);
+  // auto training_set =
+  //     xt::view(training_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
 
-  auto test_labels = xt::col(test_set_raw, 0);
-  auto test_set =
-      xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
+  // auto test_labels = xt::col(test_set_raw, 0);
+  // auto test_set =
+  //     xt::view(test_set_raw, xt::all(), xt::range(1, xt::placeholders::_));
 
-  IC(train_labels, training_set);
-  auto clf = LogReg(training_set, train_labels, N_ITER, LEARNING_RATE);
-  auto weights = clf.train();
+  // auto clf = LogReg(training_set, train_labels, N_ITER, LEARNING_RATE);
+  // auto weights = clf.train();
 
-  // IC(weights);
-  // IC(weights.shape());
+  // d_vec actual = xt::eval(test_labels);
+  // auto predictions = clf.predict(test_set);
+  // auto accuracy = xt::mean(xt::isclose(actual, predictions));
+  // IC(accuracy);
 
-  d_vec actual = xt::eval(test_labels);
-  auto predictions = clf.predict(test_set);
-  auto accuracy = xt::mean(xt::isclose(actual, predictions));
-  IC(accuracy);
+  // create two classes A and B which are normally distributed with means of 4 and -4
+  auto A = xt::random::randn<double>({100, 3}, 4, .1);
+  auto B = xt::random::randn<double>({100, 3}, -4, .1);
+
+  // concatenate 
+  auto features = xt::vstack(xt::xtuple(A,B));
+
+  // std::cout << features << std::endl;
+  auto labels = xt::squeeze(
+    xt::hstack(
+      xt::xtuple(xt::ones<d>({1,100}), xt::zeros<d>({1,100}))
+      ));
+  // std::cout << labels << std::endl;
+  // IC(labels);
+  auto e_features = xt::eval(features);
+  xt::random::seed(0);
+  xt::random::shuffle(e_features);
+
+  auto e_labels = xt::eval(labels);
+  xt::random::seed(0);
+  xt::random::shuffle(e_labels);
+
+  auto clf = LogReg(e_features, e_labels, N_ITER, LEARNING_RATE);
+  auto weights  = clf.train();
+  IC(weights);
 
   return EXIT_SUCCESS;
 }
