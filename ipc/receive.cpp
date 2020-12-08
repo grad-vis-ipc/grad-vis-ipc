@@ -12,7 +12,7 @@ int main() {
    string x;
    int count = 0;
   	*ready = 1;
-	while(cin >> x){
+	while(getline(cin, x)){
 		
       cout << "Reading: data is " << x <<endl; 
       count++;

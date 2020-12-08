@@ -1,4 +1,4 @@
-FLAGS = -I "xtensor-blas/include" -I "xtl/include" -I "xframe/include" -I "xtensor/include" -I "xframe/include"-std=c++17 -lblas -fsanitize=address -lcblas #-O -march=native
+FLAGS = -I "xtensor-blas/include" -I "xtl/include" -I "xframe/include" -I "xtensor/include" -I "xframe/include" -std=c++17 -lblas -fsanitize=address #-O -march=native
 
 
 default: sendgrad_receive.cpp receive.cpp 
@@ -19,4 +19,6 @@ test_example:
 
 clean:
 	rm -f *.out 
+
+
 
