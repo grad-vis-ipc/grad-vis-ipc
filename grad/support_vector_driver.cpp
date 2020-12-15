@@ -1,6 +1,7 @@
 #include "kernels.cpp"
 #include "stats.cpp"
 #include "support_vector_machine.hpp"
+#include "kernel_svm.cpp"
 #include "xtensor/xadapt.hpp"
 
 int main(const int argc, const char* argv[]) {
